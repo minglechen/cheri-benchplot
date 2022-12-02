@@ -3,322 +3,443 @@
     "concurrent_instances": 20,
     "reuse_instances": false,
     "instance_config": {
-        "instances": [{
-            "name": "purecap",
-            "baseline": true,
-            "kernel": "CHERI-QEMU-NODEBUG",
-            "platform": "qemu",
-            "cheri_target": "riscv64-purecap",
-            "kernelabi": "purecap"
-        }]
+        "instances": [
+            {
+                "name": "purecap",
+                "baseline": true,
+                "kernel": "CHERI-QEMU-NODEBUG",
+                "platform": "qemu",
+                "cheri_target": "riscv64-purecap",
+                "kernelabi": "purecap"
+            }
+        ]
     },
-    "benchmark_config": [{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["400.perlbench"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+    "benchmark_config": [
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "400.perlbench"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "-Idata/all/input/lib data/test/input/op_pat.t"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-		        "spec_path": "/root/spec/{spec_variant}",
-                "spec_rundir": "/root/spec/{spec_variant}/{variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["-Idata/all/input/lib data/test/input/op_pat.t"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    }, {
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["403.gcc"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "403.gcc"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "data/test/input/cccp.i -o cccp.s"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_rundir": "/root/spec/{spec_variant}/{variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["data/test/input/cccp.i -o cccp.s"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["429.mcf"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "429.mcf"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "data/test/input/inp.in"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_rundir": "/root/spec/{spec_variant}/{variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["data/test/input/inp.in"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["401.bzip2"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "401.bzip2"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "data/test/input/dryer.jpg 2"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_rundir": "/root/spec/{spec_variant}/{variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["data/test/input/dryer.jpg 2"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["445.gobmk"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "445.gobmk"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_rundir": "/root/spec/{spec_variant}/{variant}/data/all/input",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "--quiet --mode gtp < ../../test/input/dniwog.tst"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_rundir": "/root/spec/{spec_variant}/{variant}/data/all/input",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["--quiet --mode gtp < ../../test/input/dniwog.tst"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["456.hmmer"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "456.hmmer"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "--fixed 0 --mean 325 --num 45000 --sd 200 --seed 0 data/test/input/bombesin.hmm"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_rundir": "/root/spec/{spec_variant}/{variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["--fixed 0 --mean 325 --num 45000 --sd 200 --seed 0 data/test/input/bombesin.hmm"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["458.sjeng"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "458.sjeng"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "data/test/input/test.txt"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_rundir": "/root/spec/{spec_variant}/{variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["data/test/input/test.txt"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["462.libquantum"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "462.libquantum"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "143 25"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_rundir": "/root/spec/{spec_variant}/{variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["143 25"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["464.h264ref"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "464.h264ref"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "-d foreman_test_encoder_baseline.cfg"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["-d foreman_test_encoder_baseline.cfg"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["471.omnetpp"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "471.omnetpp"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_benchmark": "{variant}",
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["473.astar"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "473.astar"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "lake.cfg"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
         },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["lake.cfg"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    },{
-        "name": "{spec_variant}-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["483.xalancbmk"],
-	    "spec_variant": ["spec-riscv64-purecap", "spec-riscv64-hybrid"]
-        },
-        "command_hooks": {
-            "pre_benchmark": [
-                "sysctl hw.qemu_trace_perthread=1"
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "483.xalancbmk"
+                ],
+                "spec_variant": [
+                    "spec-riscv64-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre_benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_benchmark_options": [
+                        "-v data/test/input/test.xml data/test/input/test.xsl"
+                    ],
+                    "spec_workload": "test"
+                }
+            },
+            "aux_dataset_handlers": [
+                {
+                    "handler": "qemu-dynamorio"
+                }
             ]
-        },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-	            "spec_path": "/root/spec/{spec_variant}",
-                "spec_rundir": "/root/spec/{spec_variant}/{variant}",
-                "spec_benchmark": "{variant}",
-                "spec_benchmark_options": ["-v data/test/input/test.xml data/test/input/test.xsl"],
-                "spec_workload": "test"
-            }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
-        ]
-    }]
+        }
+    ]
 }

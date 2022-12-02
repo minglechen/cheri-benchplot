@@ -1,8 +1,8 @@
 {
     "handlers": [
         {
-            "name": "drcachesim",
-            "options": {
+            "handler": "drcachesim",
+            "task_options": {
                 "LL_cache_sizes": [
                     "64K",
                     "128K",
@@ -43,8 +43,8 @@
             }
         },
         {
-            "name": "cache-plot",
-            "options": {
+            "handler": "cache-plot",
+            "task_options": {
                 "plot_cache_levels": [
                     "L1D",
                     "L1I",

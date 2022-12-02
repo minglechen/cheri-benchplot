@@ -13,18 +13,24 @@ class QEMUTracingSetupTask(ExecutionTask):
     XXX need to split public platform options from private platform options that
     are populated here via the ProfileConfig
     """
+
     public = False
     task_namespace = "qemu.tracing"
     task_config_class = ProfileConfig
 
     def get_qemu_profile_target(self) -> LocalFileTarget:
         """The QEMU trace output file path"""
-        path = self.benchmark.get_benchmark_data_path() / f"qemu-perfetto-{self.benchmark.uuid}.pb"
+        path = (
+            self.benchmark.get_benchmark_data_path()
+            / f"qemu-perfetto-{self.benchmark.uuid}.pb"
+        )
         return LocalFileTarget(self.benchmark, path)
 
     def get_qemu_interceptor_target(self) -> LocalFileTarget:
         """The QEMU interceptor trace output file path"""
-        base_path = self.benchmark.get_benchmark_data_path() / "qemu-trace-dir"
+        base_path = (
+            self.benchmark.get_benchmark_data_path() / "qemu-trace" / "qemu-trace-dir"
+        )
         path = base_path / f"qemu-perfetto-interceptor-{self.benchmark.uuid}.trace.gz"
         return LocalFileTarget(self.benchmark, path)
 
