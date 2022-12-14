@@ -12,8 +12,16 @@ from uuid import UUID
 import pandas as pd
 
 from .benchmark import Benchmark, BenchmarkExecMode, ExecTaskConfig
-from .config import (AnalysisConfig, BenchplotUserConfig, Config, ExecTargetConfig, PipelineConfig, SessionRunConfig,
-                     TaskTargetConfig, TemplateConfigContext)
+from .config import (
+    AnalysisConfig,
+    BenchplotUserConfig,
+    Config,
+    ExecTargetConfig,
+    PipelineConfig,
+    SessionRunConfig,
+    TaskTargetConfig,
+    TemplateConfigContext,
+)
 from .instance import InstanceManager
 from .model import UUIDType
 from .task import AnalysisTask, TaskRegistry, TaskScheduler
@@ -36,8 +44,14 @@ class Session:
     main benchplot configuration. This instructs the session about the components
     to run and how.
     """
+
     @classmethod
-    def make_new(cls, user_config: BenchplotUserConfig, config: PipelineConfig, session_path: Path) -> "Session":
+    def make_new(
+        cls,
+        user_config: BenchplotUserConfig,
+        config: PipelineConfig,
+        session_path: Path,
+    ) -> "Session":
         """
         Create a new session and initialize the directory hierarchy
 
@@ -47,7 +61,9 @@ class Session:
         :return: A new session instance
         """
         if session_path.exists():
-            benchplot_logger.logger.error("Session directory already exists for session %s", session_path)
+            benchplot_logger.logger.error(
+                "Session directory already exists for session %s", session_path
+            )
             raise ValueError("New session path already exists")
         run_config = SessionRunConfig.generate(user_config, config)
         run_config.name = session_path.name
@@ -70,7 +86,9 @@ class Session:
         return False
 
     @classmethod
-    def from_path(cls, user_config: BenchplotUserConfig, path: Path) -> typing.Optional["Session"]:
+    def from_path(
+        cls, user_config: BenchplotUserConfig, path: Path
+    ) -> typing.Optional["Session"]:
         """
         Load a session from the given path.
 
@@ -90,7 +108,12 @@ class Session:
         benchplot_logger.debug("Resolved session %s => %s", path, session)
         return session
 
-    def __init__(self, user_config: BenchplotUserConfig, config: SessionRunConfig, session_path: Path = None):
+    def __init__(
+        self,
+        user_config: BenchplotUserConfig,
+        config: SessionRunConfig,
+        session_path: Path = None,
+    ):
         super().__init__()
         # Pre-initialization logger
         self.logger = new_logger(f"session-init")
@@ -114,8 +137,10 @@ class Session:
 
         # Before using the workers configuration, check if we are overriding it
         if self.user_config.concurrent_workers:
-            self.logger.debug("Overriding maximum workers count from user configuration (max=%d)",
-                              self.user_config.concurrent_workers)
+            self.logger.debug(
+                "Overriding maximum workers count from user configuration (max=%d)",
+                self.user_config.concurrent_workers,
+            )
             self.config.concurrent_workers = self.user_config.concurrent_workers
 
         #: Task scheduler
@@ -124,7 +149,9 @@ class Session:
     def __str__(self):
         return f"Session({self.uuid}) [{self.name}]"
 
-    def _resolve_exec_task_options(self, config: ExecTargetConfig) -> typing.Optional[Config]:
+    def _resolve_exec_task_options(
+        self, config: ExecTargetConfig
+    ) -> typing.Optional[Config]:
         """
         Resolve the configuration type for a :class:`ExecTargetConfig` containing run options.
 
@@ -153,20 +180,26 @@ class Session:
         # Now scan through all the configurations and subsitute per-benchmark/instance fields
         new_bench_conf = []
         for bench_conf in new_config.configurations:
-            ctx.register_template_subst(uuid=bench_conf.uuid,
-                                        g_uuid=bench_conf.g_uuid,
-                                        iterations=bench_conf.iterations,
-                                        drop_iterations=bench_conf.drop_iterations,
-                                        remote_ouptut_dir=bench_conf.remote_output_dir)
+            ctx.register_template_subst(
+                uuid=bench_conf.uuid,
+                g_uuid=bench_conf.g_uuid,
+                iterations=bench_conf.iterations,
+                drop_iterations=bench_conf.drop_iterations,
+                remote_ouptut_dir=bench_conf.remote_output_dir,
+            )
             ctx.register_template_subst(**bench_conf.parameters)
             inst_conf = bench_conf.instance
-            ctx.register_template_subst(kernel=inst_conf.kernel,
-                                        baseline=inst_conf.baseline,
-                                        platform=inst_conf.platform.value,
-                                        cheri_target=inst_conf.cheri_target.value,
-                                        kernelabi=inst_conf.kernelabi.value)
+            ctx.register_template_subst(
+                kernel=inst_conf.kernel,
+                baseline=inst_conf.baseline,
+                platform=inst_conf.platform.value,
+                cheri_target=inst_conf.cheri_target.value,
+                kernelabi=inst_conf.kernelabi.value,
+            )
             # Resolve run_options for each TaskTargetConfig
-            bench_conf.benchmark.task_options = self._resolve_exec_task_options(bench_conf.benchmark)
+            bench_conf.benchmark.task_options = self._resolve_exec_task_options(
+                bench_conf.benchmark
+            )
             for aux_conf in bench_conf.aux_tasks:
                 aux_conf.task_options = self._resolve_exec_task_options(aux_conf)
             new_bench_conf.append(bench_conf.bind(ctx))
@@ -192,10 +225,12 @@ class Session:
             self.logger.error("Missing baseline instance")
             raise RuntimeError("Missing baseline")
         baseline_conf = self.benchmark_matrix[baseline].iloc[0].config
-        self.logger.debug("Benchmark baseline %s (%s)", baseline_conf.instance.name, baseline)
+        self.logger.debug(
+            "Benchmark baseline %s (%s)", baseline_conf.instance.name, baseline
+        )
         return baseline
 
-    def _resolve_benchmark_matrix(self) -> typing.Tuple[pd.DataFrame, UUID]:
+    def _resolve_benchmark_matrix(self) -> pd.DataFrame:
         """
         Generate the benchmark matrix from the benchmark configurations.
         In the resulting dataframe:
@@ -227,7 +262,8 @@ class Session:
         for index_name in bench_matrix.index.names:
             if not re.fullmatch(r"[a-zA-Z0-9_]+", index_name):
                 self.logger.exception(
-                    "Benchmark parameter keys must be valid python property names, only [a-zA-Z0-9_] allowed")
+                    "Benchmark parameter keys must be valid python property names, only [a-zA-Z0-9_] allowed"
+                )
                 raise ValueError("Invalid parameter key")
         BenchParams = namedtuple("BenchParams", bench_matrix.index.names)
         for benchmark_config in self.config.configurations:
@@ -247,7 +283,9 @@ class Session:
                 i = BenchParams(*i)
             row_str = [str(bench_ctx) for bench_ctx in row.values]
             self.logger.debug("Benchmark matrix %s = %s", i, row_str)
-        if bench_matrix.shape[0] * bench_matrix.shape[1] != len(self.config.configurations):
+        if bench_matrix.shape[0] * bench_matrix.shape[1] != len(
+            self.config.configurations
+        ):
             self.logger.error("Malformed benchmark matrix")
             raise RuntimeError("Malformed benchmark matrix")
 
@@ -316,7 +354,9 @@ class Session:
         if bundle_file.exists():
             self.logger.info("Replacing old bundle %s", bundle_file)
             bundle_file.unlink()
-        result = subprocess.run(["tar", "-J", "-c", "-f", bundle_file, self.session_root_path])
+        result = subprocess.run(
+            ["tar", "-J", "-c", "-f", bundle_file, self.session_root_path]
+        )
         if result.returncode:
             self.logger.error("Failed to produce bundle")
         self.logger.info("Archive created at %s", bundle_file)
@@ -415,26 +455,43 @@ class Session:
         :param analysis_config: The analysis configuration
         """
         # Override the baseline ID if configured
-        if (analysis_config.baseline_gid is not None and analysis_config.baseline_gid != self.baseline_g_uuid):
+        if (
+            analysis_config.baseline_gid is not None
+            and analysis_config.baseline_gid != self.baseline_g_uuid
+        ):
             self.baseline_g_uuid = analysis_config.baseline_gid
             try:
-                baseline_conf = self.benchmark_matrix[self.baseline_g_uuid].iloc[0].config
+                baseline_conf = (
+                    self.benchmark_matrix[self.baseline_g_uuid].iloc[0].config
+                )
             except KeyError:
-                self.logger.error("Invalid baseline instance ID %s", self.baseline_g_uuid)
+                self.logger.error(
+                    "Invalid baseline instance ID %s", self.baseline_g_uuid
+                )
                 raise
-            self.logger.info("Using alternative baseline %s (%s)", baseline_conf.instance.name, self.baseline_g_uuid)
+            self.logger.info(
+                "Using alternative baseline %s (%s)",
+                baseline_conf.instance.name,
+                self.baseline_g_uuid,
+            )
 
         for task_spec in analysis_config.handlers:
             resolved = TaskRegistry.resolve_task(task_spec.handler)
             if not resolved:
-                self.logger.error("Invalid task name specification %s", task_spec.handler)
+                self.logger.error(
+                    "Invalid task name specification %s", task_spec.handler
+                )
                 raise ValueError("Invalid task name")
             for task_klass in resolved:
                 if not issubclass(task_klass, AnalysisTask):
-                    self.logger.warning("Analysis process only supports scheduling of AnalysisTasks, skipping %s",
-                                        task_klass)
+                    self.logger.warning(
+                        "Analysis process only supports scheduling of AnalysisTasks, skipping %s",
+                        task_klass,
+                    )
                 if task_klass.task_config_class:
-                    options = task_class.task_config_class.schema().load(task_spec.task_options)
+                    options = task_klass.task_config_class.schema().load(
+                        task_spec.task_options
+                    )
                 else:
                     options = task_spec.task_options
                 task = task_klass(self, analysis_config, task_config=options)

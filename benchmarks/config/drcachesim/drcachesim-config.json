@@ -1,7 +1,7 @@
 {
     "handlers": [
         {
-            "handler": "drcachesim",
+            "handler": "drcachesim-run.drcachesim",
             "task_options": {
                 "LL_cache_sizes": [
                     "64K",
@@ -40,16 +40,6 @@
                 "drrun_path": "/local/scratch/mc2262/dynamorio/build/bin64/drrun",
                 "remove_saved_results": false,
                 "rerun_sim": false
-            }
-        },
-        {
-            "handler": "cache-plot",
-            "task_options": {
-                "plot_cache_levels": [
-                    "L1D",
-                    "L1I",
-                    "LL"
-                ]
             }
         }
     ]

@@ -1,7 +1,4 @@
-import asyncio as aio
-import os
 import shutil
-import subprocess
 import typing
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,8 +91,8 @@ class DrCacheSimAnalyseTask(AnalysisTask):
     task_config_class: typing.Type[Config] = DrCacheSimConfig
 
     def dependencies(self) -> typing.Iterable["Task"]:
-        for col in self.session.benchmark_matrix.iteritems():
-            for benchmark in col:
+        for i, row in self.session.benchmark_matrix.iterrows():
+            for benchmark in row:
                 data_path = benchmark.get_benchmark_data_path()
                 base = data_path / "drcachesim-results"
                 indir = data_path / "qemu-trace" / "qemu-trace-dir"
@@ -104,7 +101,6 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                 if not base.exists():
                     base.mkdir(parents=True)
 
-                self.logger.info(f"Running drcachesim")
                 for level in self.config.run_cache_levels:
                     if level == "LL":
                         sizes = self.config.LL_cache_sizes
@@ -114,11 +110,13 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                             config = DrCacheSimRunConfig(
                                 drrun_path=self.config.drrun_path,
                                 indir=indir,
-                                level_arg="LL_size",
-                                size=s,
-                                out_path=out_path / f"{s}.txt",
+                                cache_level="LL",
+                                cache_size=s,
+                                output_path=out_path / f"{s}.txt",
                             )
-                            yield DrCaheSimRunTask(benchmark, config)
+                            yield DrCaheSimRunTask(
+                                config,
+                            )
                     elif level == "L1D":
                         sizes = self.config.L1D_cache_sizes
                         out_path = base / "L1D_size"
@@ -127,11 +125,13 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                             config = DrCacheSimRunConfig(
                                 drrun_path=self.config.drrun_path,
                                 indir=indir,
-                                level_arg="L1D_size",
-                                size=s,
-                                out_path=out_path / f"{s}.txt",
+                                cache_level="L1D",
+                                cache_size=s,
+                                output_path=out_path / f"{s}.txt",
                             )
-                            yield DrCaheSimRunTask(benchmark, config)
+                            yield DrCaheSimRunTask(
+                                config,
+                            )
                     elif level == "L1I":
                         sizes = self.config.L1I_cache_sizes
                         out_path = base / "L1I_size"
@@ -140,13 +140,15 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                             config = DrCacheSimRunConfig(
                                 drrun_path=self.config.drrun_path,
                                 indir=indir,
-                                level_arg="L1I_size",
-                                size=s,
-                                out_path=out_path / f"{s}.txt",
+                                cache_level="L1I",
+                                cache_size=s,
+                                output_path=out_path / f"{s}.txt",
                             )
-                            yield DrCaheSimRunTask(benchmark, config)
+                            yield DrCaheSimRunTask(
+                                config,
+                            )
                     else:
                         self.logger.error(f"Unknown cache level {level}")
 
     def run(self):
-        self.logger.info(f"Finished drcachesim")
+        self.logger.info(f"Finished drcachesim analysis")

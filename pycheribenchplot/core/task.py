@@ -19,6 +19,7 @@ class WorkerShutdown(Exception):
     """
     Special exception that triggers the worker thread loop shutdown.
     """
+
     pass
 
 
@@ -30,6 +31,7 @@ class TaskRegistry(type):
     :attribute public_tasks: Map task_namespace -> { task_name -> Task } for publicly name-able tasks
     :attribute all_tasks: Map task_namespace -> { task_name -> Task } for all tasks
     """
+
     public_tasks = defaultdict(dict)
     all_tasks = defaultdict(dict)
 
@@ -40,7 +42,9 @@ class TaskRegistry(type):
             return
         ns = TaskRegistry.all_tasks[self.task_namespace]
         if self.task_name in ns:
-            raise ValueError(f"Multiple tasks with the same name: {self}, {ns[self.task_name]}")
+            raise ValueError(
+                f"Multiple tasks with the same name: {self}, {ns[self.task_name]}"
+            )
         ns[self.task_name] = self
         if self.public:
             ns = TaskRegistry.public_tasks[self.task_namespace]
@@ -99,6 +103,7 @@ class Target:
     Helper to represent output artifacts of a task.
     This is the base class to also support non-file targets if necessary.
     """
+
     def is_file(self):
         """
         When true, the target should be a subclass of :class:`FileTarget`
@@ -110,6 +115,7 @@ class DataFrameTarget(Target):
     """
     Target wrapping an output dataframe from a task.
     """
+
     def __init__(self, model: "DataModel", df: pd.DataFrame):
         self.model = model
         self.df = df
@@ -119,6 +125,7 @@ class PlotTarget(Target):
     """
     Target pointing to a plot path
     """
+
     def __init__(self, path):
         self.path = path
 
@@ -127,6 +134,7 @@ class FileTarget(Target):
     """
     Base class for a target output file.
     """
+
     @classmethod
     def from_task(cls, task: "Task", prefix: str = None, ext: str = None, **kwargs):
         """
@@ -149,7 +157,13 @@ class FileTarget(Target):
             path = path.with_suffix(ext)
         return cls(task.benchmark, path, **kwargs)
 
-    def __init__(self, benchmark, path: Path, has_iteration_path: bool = False, use_data_root: bool = False):
+    def __init__(
+        self,
+        benchmark,
+        path: Path,
+        has_iteration_path: bool = False,
+        use_data_root: bool = False,
+    ):
         """
         :param benchmark: The benchmark context this file belongs to
         :param path: The file relative path from the benchmark output data directory.
@@ -169,7 +183,9 @@ class FileTarget(Target):
         If the path depends on the iteration index, this raises a TypeError.
         """
         if self.has_iteration_path:
-            raise ValueError("Can not use shorthand path property when multiple paths are present")
+            raise ValueError(
+                "Can not use shorthand path property when multiple paths are present"
+            )
         return self.paths[0]
 
     @property
@@ -195,8 +211,13 @@ class FileTarget(Target):
                 base = self.benchmark.get_benchmark_data_path()
             return [base / self._path]
         if self.use_data_root:
-            raise NotImplementedError("Using the data root path for iteration output is not yet supported")
-        base_paths = map(self.benchmark.get_benchmark_iter_data_path, range(self.benchmark.config.iterations))
+            raise NotImplementedError(
+                "Using the data root path for iteration output is not yet supported"
+            )
+        base_paths = map(
+            self.benchmark.get_benchmark_iter_data_path,
+            range(self.benchmark.config.iterations),
+        )
         return [path / self._path for path in base_paths]
 
     @property
@@ -217,6 +238,7 @@ class DataFileTarget(FileTarget):
     """
     A target output file that is generated on the guest and needs to be extracted.
     """
+
     @property
     def remote_path(self):
         base = self.benchmark.get_benchmark_data_path()
@@ -237,6 +259,7 @@ class LocalFileTarget(FileTarget):
     """
     A target output file that is generated on the host and does not need to be extracted
     """
+
     @property
     def remote_path(self):
         raise TypeError("LocalFileTarget does not have a corresponding remote path")
@@ -259,6 +282,7 @@ class Task(metaclass=TaskRegistry):
     The drones will share the task state with the main task instance to maintain consistency
     when producing stateful task outputs. This is a relatively strange dynamic Borg pattern.
     """
+
     #: Mark the task as a top-level target
     public = False
     #: Human-readable task namespace, used for task identification
@@ -269,7 +293,9 @@ class Task(metaclass=TaskRegistry):
     task_config_class: typing.Type[Config] = None
 
     def __init__(self, task_config: Config = None):
-        assert self.task_name is not None, f"Attempted to use task with uninitialized name {self.__class__.__name__}"
+        assert (
+            self.task_name is not None
+        ), f"Attempted to use task with uninitialized name {self.__class__.__name__}"
         #: task-specific configuration options, if any
         self.config = task_config
         #: task logger
@@ -415,11 +441,17 @@ class ExecutionTask(Task):
     2. Configure the benchmark instance via platform_options.
     3. Add commands to the benchmark run script sections.
     """
+
     task_name = "exec"
     #: Whether the task requires a running VM instance or not. Instead of changing this use :class:`DataGenTask`.
     require_instance = True
 
-    def __init__(self, benchmark: "Benchmark", script: "ScriptBuilder", task_config: Config = None):
+    def __init__(
+        self,
+        benchmark: "Benchmark",
+        script: "ScriptBuilder",
+        task_config: Config = None,
+    ):
         super().__init__(task_config=task_config)
         #: Associated benchmark context
         self.benchmark = benchmark
@@ -458,6 +490,7 @@ class DataGenTask(ExecutionTask):
     DataGenTasks should not depend on execution tasks, this is to avoid scanning the whole dependency tree
     to determine whether we need to request an instance or not, however the reverse is allowed.
     """
+
     #: Whether the task requires a running VM instance or not.
     require_instance = False
 
@@ -469,9 +502,15 @@ class AnalysisTask(Task):
     Analysis tasks are not necessarily associated to a single benchmark. In general they reference the
     current session and analysis configuration, subclasses may be associated to a benchmark context.
     """
+
     task_namespace = "analysis"
 
-    def __init__(self, session: "Session", analysis_config: AnalysisConfig, task_config: Config = None):
+    def __init__(
+        self,
+        session: "Session",
+        analysis_config: AnalysisConfig,
+        task_config: Config = None,
+    ):
         super().__init__(task_config=task_config)
         #: The current session
         self._session = session
@@ -500,6 +539,7 @@ class ResourceManager:
     Resource managers are identified by the resource name, so concrete managers must set
     a resource_name class property and collisions are not allowed.
     """
+
     resource_name: str = None
 
     @dc.dataclass
@@ -508,6 +548,7 @@ class ResourceManager:
         Private object representing a request for this resource.
         This is sortable and comparable.
         """
+
         name: str
         pool: typing.Hashable | None
         acquire_args: dict[str, typing.Any]
@@ -517,7 +558,11 @@ class ResourceManager:
             return self.name < other.name
 
         def __eq__(self, other):
-            return self.name == other.name and self.pool == other.pool and self.acquire_args == other.acquire_args
+            return (
+                self.name == other.name
+                and self.pool == other.pool
+                and self.acquire_args == other.acquire_args
+            )
 
         def set_resource(self, r):
             """
@@ -542,14 +587,19 @@ class ResourceManager:
         return cls.ResourceRequest(cls.resource_name, pool, kwargs)
 
     def __init__(self, session: "Session", limit: int | None):
-        assert self.resource_name is not None, f"{self.__class__} is missing resource name?"
+        assert (
+            self.resource_name is not None
+        ), f"{self.__class__} is missing resource name?"
         self.session = session
         self.logger = new_logger(f"rman-{self.resource_name}")
         self.limit = limit
         if not self.is_unlimited:
             self._limit_guard = Semaphore(self.limit)
-        self.logger.debug("Initialized resource manager %s with limit %s", self.resource_name, self.limit
-                          or "<unlimited>")
+        self.logger.debug(
+            "Initialized resource manager %s with limit %s",
+            self.resource_name,
+            self.limit or "<unlimited>",
+        )
 
     def __str__(self):
         return f"{self.__class__.__name__}[{self.resource_name}]"
@@ -603,7 +653,9 @@ class ResourceManager:
             r = self._get_resource(req)
             req.set_resource(r)
         except:
-            self.logger.error("Failed to produce %s from pool %s", self.resource_name, req.pool)
+            self.logger.error(
+                "Failed to produce %s from pool %s", self.resource_name, req.pool
+            )
             raise
         finally:
             self._release(req.pool)
@@ -615,7 +667,9 @@ class ResourceManager:
             try:
                 self._put_resource(r, req)
             except:
-                self.logger.error("Failed to return %s to pool %s", self.resource_name, req.pool)
+                self.logger.error(
+                    "Failed to return %s to pool %s", self.resource_name, req.pool
+                )
                 raise
             finally:
                 self._release(req.pool)
@@ -634,6 +688,7 @@ class TaskScheduler:
     """
     Schedule running tasks into workers, handling task dependencies.
     """
+
     def __init__(self, session: "Session"):
         """
         :param session: The parent session
@@ -709,7 +764,9 @@ class TaskScheduler:
         If the worker has been asked to shut down we also take this opportunity to bail out.
         """
         with self._worker_wakeup:
-            self._worker_wakeup.wait_for(lambda: self._worker_shutdown or len(self._task_queue) > 0)
+            self._worker_wakeup.wait_for(
+                lambda: self._worker_shutdown or len(self._task_queue) > 0
+            )
             if self._worker_shutdown:
                 raise WorkerShutdown()
             return self._task_queue.pop(0)
@@ -723,7 +780,9 @@ class TaskScheduler:
             self.logger.debug("Caught worker shutdown signal, exit worker loop")
         except Exception as ex:
             # This should never happen, everything should be caught within the worker loop
-            self.logger.critical("Critical error in worker thread, scheduler state is undefined: %s", ex)
+            self.logger.critical(
+                "Critical error in worker thread, scheduler state is undefined: %s", ex
+            )
         self.logger.debug("Shutdown worker[%d]", worker_index)
 
     def _worker_loop_one(self, worker_index: int):
@@ -740,10 +799,14 @@ class TaskScheduler:
             for dep_id in self._task_graph.successors(task.task_id):
                 dep = self._task_graph.nodes[dep_id]["task"]
                 dep.wait()
-                assert dep.completed, f"Dependency wait() returned but task is not completed {dep}"
+                assert (
+                    dep.completed
+                ), f"Dependency wait() returned but task is not completed {dep}"
                 # If a dependency failed, we need to do some scheduling changes, the exception triggers it
                 if dep.failed:
-                    self.logger.error("Dependency %s failed, bail out from %s", dep, task)
+                    self.logger.error(
+                        "Dependency %s failed, bail out from %s", dep, task
+                    )
                     raise RuntimeError("Task dependency failed")
                 # Before continuing, we should check whether somebody notified worker shutdown
                 with self._worker_wakeup:
@@ -753,7 +816,9 @@ class TaskScheduler:
             with ExitStack() as resource_stack:
                 resources = {}
                 for req in sorted(task.resources()):
-                    resources[req.name] = resource_stack.enter_context(self._rman[req.name].acquire(req))
+                    resources[req.name] = resource_stack.enter_context(
+                        self._rman[req.name].acquire(req)
+                    )
                 # Now we can run the task
                 task.run()
             # We have finished with the task, if we reach this point the task completed successfully
@@ -768,7 +833,9 @@ class TaskScheduler:
             # Just pass it through
             raise
         except Exception as ex:
-            self.logger.exception("Error in worker[%d] handling task %s", worker_index, task)
+            self.logger.exception(
+                "Error in worker[%d] handling task %s", worker_index, task
+            )
             # Notify other workers that may be waiting on this dependency that they should bail out.
             task.notify_failed(ex)
             # Now we need to cancel some tasks
@@ -816,24 +883,35 @@ class TaskScheduler:
         """
         try:
             if self.session.config.reuse_instances:
-                sched = nx.lexicographical_topological_sort(self._task_graph,
-                                                            key=lambda t: self._task_graph[t]["task"].g_uuid)
+                sched = nx.lexicographical_topological_sort(
+                    self._task_graph, key=lambda t: self._task_graph[t]["task"].g_uuid
+                )
             else:
                 sched = nx.topological_sort(self._task_graph)
-            run_sched = [self._task_graph.nodes[t]["task"] for t in reversed(list(sched))]
+            run_sched = [
+                self._task_graph.nodes[t]["task"] for t in reversed(list(sched))
+            ]
             self.logger.debug("Resolved benchmark schedule %s", run_sched)
             return run_sched
         except nx.NetworkXUnfeasible:
             for cycle in nx.simple_cycles(self._task_graph):
                 cycle_str = [str(self._task_graph.nodes[c]["task"]) for c in cycle]
-                self.logger.error("Impossible task schedule: cyclic dependency %s", cycle_str)
+                self.logger.error(
+                    "Impossible task schedule: cyclic dependency %s", cycle_str
+                )
             raise RuntimeError("Impossible to create a task schedule")
 
     def register_resource(self, rman: ResourceManager):
         if rman.resource_name in self._rman:
-            self.logger.error("Duplicate resource manager registration %s: given %s found %s", rman.resource_name, rman,
-                              self._rman[rman.resource_name])
-            raise ValueError("Resource manager with the same name is already registered")
+            self.logger.error(
+                "Duplicate resource manager registration %s: given %s found %s",
+                rman.resource_name,
+                rman,
+                self._rman[rman.resource_name],
+            )
+            raise ValueError(
+                "Resource manager with the same name is already registered"
+            )
         self._rman[rman.resource_name] = rman
 
     def run(self):

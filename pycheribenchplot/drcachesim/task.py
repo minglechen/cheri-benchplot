@@ -5,7 +5,7 @@ from pathlib import Path
 from marshmallow.validate import OneOf
 
 from ..core.config import ConfigPath, ProfileConfig, TemplateConfig
-from ..core.task import DataFileTarget, AnalysisTask
+from ..core.task import Task
 from ..qemu.task import QEMUTracingSetupTask
 from subprocess import run, PIPE, CompletedProcess
 
@@ -22,9 +22,11 @@ class DrCacheSimRunConfig(TemplateConfig):
     cache_level: str = "LL"
     #: Indir for drcachesim
     indir: ConfigPath = Path("traces")
+    #: Rerun drcachesim even if output file exists
+    rerun_sim: bool = False
 
 
-class DrCaheSimRunTask(AnalysisTask):
+class DrCaheSimRunTask(Task):
     """Run a single drcachesim analysis"""
 
     public = True
@@ -32,27 +34,36 @@ class DrCaheSimRunTask(AnalysisTask):
     task_namespace = "drcachesim-run"
     task_config_class = DrCacheSimRunConfig
 
-    def __init__(self, benchmark, config):
-        super().__init__(benchmark, config)
+    @property
+    def task_id(self):
+        #: This is a bit of a hack to make sure that the task_id is unique
+        return f"{self.task_namespace}.{self.task_name}-{self.config.cache_level}-{self.config.cache_size}"
 
     def _run_drcachesim(self):
         level_arg = self.config.cache_level + "_size"
-        out_path: Path = self.config.output_path
+        out_path = self.config.output_path
         size = self.config.cache_size
         indir = self.config.indir
         if out_path.is_file() and not self.config.rerun_sim:
+            print(out_path, "already exists, skipping")
             return
         p: CompletedProcess = run(
-            self.config.drrun_path,
-            "-t",
-            "drcachesim",
-            "-indir",
-            indir,
-            "-" + level_arg,
-            size,
+            [
+                self.config.drrun_path,
+                "-t",
+                "drcachesim",
+                "-indir",
+                indir,
+                "-" + level_arg,
+                size,
+            ],
             stderr=PIPE,
         )
-        p.stderr.decode("utf-8")
+        result = p.stderr.decode("utf-8")
+        with open(out_path, "w") as f:
+            f.write(result)
 
     def run(self):
+        self.logger.info(f"Running drcachesim on {self.config.indir}")
         self._run_drcachesim()
+        self.logger.info(f"Finished running drcachesim on {self.config.indir}")
