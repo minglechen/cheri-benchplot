@@ -1,0 +1,11 @@
+{
+    "handlers": [
+        {
+            "handler": "addr2line.addr2line",
+            "task_options": {
+                "obj_path": "/local/scratch/mc2262/extra-files/root/spec_static/spec-riscv64-purecap/471.omnetpp/471.omnetpp",
+                "output_path": "/local/scratch/mc2262/test_addr2line.csv"
+            }
+        }
+    ]
+}

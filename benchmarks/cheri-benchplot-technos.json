@@ -1,5 +1,8 @@
 {
     "sdk_path": "/local/scratch/mc2262/output/sdk",
     "build_path": "/local/scratch/mc2262/build",
-    "src_path": "/local/scratch/mc2262"
+    "src_path": "/local/scratch/mc2262",
+    "rootfs_path": "/local/scratch/mc2262/output/rootfs-riscv64-purecap",
+    "hybrid_rootfs_path": "/local/scratch/mc2262/output/rootfs-riscv64-hybrid",
+    "cheribsd_extra_files_path": "/local/scratch/mc2262/extra-files"
 }

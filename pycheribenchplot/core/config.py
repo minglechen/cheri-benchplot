@@ -51,6 +51,7 @@ class PathField(mfields.Field):
     """
     Simple wrapper for pathlib.Path fields
     """
+
     def _serialize(self, value, attr, obj, **kwargs):
         if value is None:
             return ""
@@ -66,8 +67,10 @@ class PathField(mfields.Field):
 
 
 #: Helper to validate that a PathField points to an existing regular file
-validate_path_exists = And(Predicate("exists", error="File does not exist"),
-                           Predicate("is_file", error="File is not regular file"))
+validate_path_exists = And(
+    Predicate("exists", error="File does not exist"),
+    Predicate("is_file", error="File is not regular file"),
+)
 
 
 class TaskSpecField(mfields.Field):
@@ -76,6 +79,7 @@ class TaskSpecField(mfields.Field):
 
     See :meth:`TaskRegistry.resolve_task` for details on the format.
     """
+
     def _serialize(self, value, attr, obj, **kwargs):
         if value is None:
             return ""
@@ -83,9 +87,12 @@ class TaskSpecField(mfields.Field):
 
     def _validate_taskspec(self, value):
         from .task import TaskRegistry
+
         task = TaskRegistry.resolve_task(value)
         if not task:
-            raise ValidationError(f"Task specifier {value} does not name any public tasks")
+            raise ValidationError(
+                f"Task specifier {value} does not name any public tasks"
+            )
 
     def _deserialize(self, value, attr, data, **kwargs):
         value = str(value)
@@ -102,11 +109,15 @@ class ExecTaskSpecField(TaskSpecField):
 
     See :meth:`TaskRegistry.resolve_exec_task` for details on the format.
     """
+
     def _validate_taskspec(self, value):
         from .task import TaskRegistry
+
         task = TaskRegistry.resolve_exec_task(value)
         if not task:
-            raise ValidationError(f"Task specifier {value} does not name any public tasks")
+            raise ValidationError(
+                f"Task specifier {value} does not name any public tasks"
+            )
 
 
 # Helper type for dataclasses to use the PathField
@@ -124,6 +135,7 @@ class Config:
     nested configuration dataclasses.
     Types of the fields are normalized to the type annotation given in the dataclass.
     """
+
     class Meta:
         ordered = True
 
@@ -157,6 +169,7 @@ class TemplateConfigContext:
     """
     Base class for context that can be used to bind TemplateConfig to.
     """
+
     def __init__(self):
         self._template_params = {}
 
@@ -215,7 +228,9 @@ class TemplateConfig(Config):
             return [self._bind_one(context, arg_type, v) for v in value]
         elif origin is Dict or origin is dict:
             arg_type = get_args(f.type)[1]
-            return {key: self._bind_one(context, arg_type, v) for key, v in value.items()}
+            return {
+                key: self._bind_one(context, arg_type, v) for key, v in value.items()
+            }
         else:
             return self._bind_one(context, f.type, value)
 
@@ -234,7 +249,9 @@ class TemplateConfig(Config):
             try:
                 replaced = self.bind_field(context, f, getattr(self, f.name))
             except Exception as ex:
-                raise ValueError(f"Failed to bind {f.name} with value {getattr(self, f.name)}: {ex}")
+                raise ValueError(
+                    f"Failed to bind {f.name} with value {getattr(self, f.name)}: {ex}"
+                )
             if replaced:
                 changes[f.name] = replaced
         return dc.replace(self, **changes)
@@ -272,6 +289,12 @@ class BenchplotUserConfig(Config):
 
     #: CHERI rootfs path
     rootfs_path: Optional[ConfigPath] = None
+
+    #: Hybrid rootfs path
+    hybrid_rootfs_path: Optional[ConfigPath] = None
+
+    #: Path to the CheriBSD extra files
+    cheribsd_extra_files_path: Optional[ConfigPath] = dc.field(default=None)
 
     #: Path to cheribuild, inferred from :attr:`src_path` if missing
     cheribuild_path: Optional[ConfigPath] = dc.field(init=False, default=None)
@@ -311,6 +334,7 @@ class CommonPlatformOptions(TemplateConfig):
     This is internally used during benchmark dataset collection to
     set options for the instance that is to be run.
     """
+
     #: Number of cores in the system
     cores: int = 1
 
@@ -321,7 +345,10 @@ class CommonPlatformOptions(TemplateConfig):
     qemu_interceptor_trace_file: Optional[ConfigPath] = None
 
     #: Run qemu with tracing enabled ('no', "perfetto", "perfetto-dynamorio")
-    qemu_trace: str = dc.field(default="no", metadata={"validate": OneOf(["no", "perfetto", "perfetto-dynamorio"])})
+    qemu_trace: str = dc.field(
+        default="no",
+        metadata={"validate": OneOf(["no", "perfetto", "perfetto-dynamorio"])},
+    )
 
     #: Trace categories to enable for qemu-perfetto
     qemu_trace_categories: Set[str] = dc.field(default_factory=set)
@@ -345,6 +372,7 @@ class PlatformOptions(TemplateConfig):
     so that we can go look them up in the common options before setting
     a default value.
     """
+
     #: Number of cores in the system
     cores: Optional[int] = None
 
@@ -355,7 +383,10 @@ class PlatformOptions(TemplateConfig):
     qemu_interceptor_trace_file: Optional[ConfigPath] = None
 
     #: Run qemu with tracing enabled
-    qemu_trace: str = dc.field(default="no", metadata={"validate": OneOf(["no", "perfetto", "perfetto-dynamorio"])})
+    qemu_trace: str = dc.field(
+        default="no",
+        metadata={"validate": OneOf(["no", "perfetto", "perfetto-dynamorio"])},
+    )
 
     #: Trace categories to enable for qemu-perfetto
     qemu_trace_categories: Optional[Set[str]] = None
@@ -379,15 +410,20 @@ class ProfileConfig(TemplateConfig):
     These are inteded to be embedded into benchmark task_options for those benchmarks
     that support some form of profiling.
     """
+
     #: Run qemu with tracing enabled
-    qemu_trace: Optional[str] = dc.field(default=None,
-                                         metadata={"validate": OneOf([None, "perfetto", "perfetto-dynamorio"])})
+    qemu_trace: Optional[str] = dc.field(
+        default=None,
+        metadata={"validate": OneOf([None, "perfetto", "perfetto-dynamorio"])},
+    )
 
     #: Trace categories to enable for qemu-perfetto
     qemu_trace_categories: Optional[Set[str]] = None
 
     #: HWPMC performance counters modes
-    hwpmc_trace: Optional[str] = dc.field(default=None, metadata={"validate": OneOf([None, "pmc", "profclock"])})
+    hwpmc_trace: Optional[str] = dc.field(
+        default=None, metadata={"validate": OneOf([None, "pmc", "profclock"])}
+    )
 
 
 class InstancePlatform(Enum):
@@ -405,10 +441,16 @@ class InstanceCheriBSD(Enum):
     MORELLO_HYBRID = "morello-hybrid"
 
     def is_riscv(self):
-        return (self == InstanceCheriBSD.RISCV64_PURECAP or self == InstanceCheriBSD.RISCV64_HYBRID)
+        return (
+            self == InstanceCheriBSD.RISCV64_PURECAP
+            or self == InstanceCheriBSD.RISCV64_HYBRID
+        )
 
     def is_morello(self):
-        return (self == InstanceCheriBSD.MORELLO_PURECAP or self == InstanceCheriBSD.MORELLO_HYBRID)
+        return (
+            self == InstanceCheriBSD.MORELLO_PURECAP
+            or self == InstanceCheriBSD.MORELLO_HYBRID
+        )
 
     def freebsd_kconf_dir(self):
         if self.is_riscv():
@@ -438,12 +480,19 @@ class InstanceConfig(TemplateConfig):
     Configuration for a CheriBSD instance to run benchmarks on.
     XXX-AM May need a custom __eq__() if iterable members are added
     """
+
     kernel: str
     baseline: bool = False
     name: Optional[str] = None
-    platform: InstancePlatform = dc.field(default=InstancePlatform.QEMU, metadata={"by_value": True})
-    cheri_target: InstanceCheriBSD = dc.field(default=InstanceCheriBSD.RISCV64_PURECAP, metadata={"by_value": True})
-    kernelabi: InstanceKernelABI = dc.field(default=InstanceKernelABI.HYBRID, metadata={"by_value": True})
+    platform: InstancePlatform = dc.field(
+        default=InstancePlatform.QEMU, metadata={"by_value": True}
+    )
+    cheri_target: InstanceCheriBSD = dc.field(
+        default=InstanceCheriBSD.RISCV64_PURECAP, metadata={"by_value": True}
+    )
+    kernelabi: InstanceKernelABI = dc.field(
+        default=InstanceKernelABI.HYBRID, metadata={"by_value": True}
+    )
     # Is the kernel config name managed by cheribuild or is it an extra one
     # specified via --cheribsd/extra-kernel-configs?
     cheribuild_kernel: bool = True
@@ -452,24 +501,32 @@ class InstanceConfig(TemplateConfig):
 
     @property
     def user_pointer_size(self):
-        if (self.cheri_target == InstanceCheriBSD.RISCV64_PURECAP
-                or self.cheri_target == InstanceCheriBSD.MORELLO_PURECAP):
+        if (
+            self.cheri_target == InstanceCheriBSD.RISCV64_PURECAP
+            or self.cheri_target == InstanceCheriBSD.MORELLO_PURECAP
+        ):
             return 16
-        elif (self.cheri_target == InstanceCheriBSD.RISCV64_HYBRID
-              or self.cheri_target == InstanceCheriBSD.MORELLO_HYBRID):
+        elif (
+            self.cheri_target == InstanceCheriBSD.RISCV64_HYBRID
+            or self.cheri_target == InstanceCheriBSD.MORELLO_HYBRID
+        ):
             return 8
         assert False, "Not reached"
 
     @property
     def kernel_pointer_size(self):
-        if (self.cheri_target == InstanceCheriBSD.RISCV64_PURECAP
-                or self.cheri_target == InstanceCheriBSD.MORELLO_PURECAP):
+        if (
+            self.cheri_target == InstanceCheriBSD.RISCV64_PURECAP
+            or self.cheri_target == InstanceCheriBSD.MORELLO_PURECAP
+        ):
             if self.kernelabi == InstanceKernelABI.PURECAP:
                 return self.user_pointer_size
             else:
                 return 8
-        elif (self.cheri_target == InstanceCheriBSD.RISCV64_HYBRID
-              or self.cheri_target == InstanceCheriBSD.MORELLO_HYBRID):
+        elif (
+            self.cheri_target == InstanceCheriBSD.RISCV64_HYBRID
+            or self.cheri_target == InstanceCheriBSD.MORELLO_HYBRID
+        ):
             if self.kernelabi == InstanceKernelABI.PURECAP:
                 return 16
             else:
@@ -479,7 +536,9 @@ class InstanceConfig(TemplateConfig):
     def __post_init__(self):
         super().__post_init__()
         if self.name is None:
-            self.name = f"{self.platform}-{self.cheri_target}-{self.kernelabi}-{self.kernel}"
+            self.name = (
+                f"{self.platform}-{self.cheri_target}-{self.kernelabi}-{self.kernel}"
+            )
 
     def __str__(self):
         return f"{self.name}"
@@ -490,6 +549,7 @@ class TaskTargetConfig(TemplateConfig):
     """
     Specify an analysis task and associated options.
     """
+
     #: Task specifier with format indicated by :meth:`TaskRegistry.resolve_task`
     handler: ConfigTaskSpec
 
@@ -503,6 +563,7 @@ class ExecTargetConfig(TemplateConfig):
     Specify an execution task name.
     Note that the namespace of this task is also used to resolve compatible analysis tasks.
     """
+
     #: Task specifier with format indicated by :meth:`TaskRegistry.resolve_exec_task`
     handler: ConfigExecTaskSpec
 
@@ -518,7 +579,9 @@ class PipelineInstanceConfig(Config):
     """
 
     #: Common platform options, depend on the platforms used in the instances
-    platform_options: CommonPlatformOptions = dc.field(default_factory=CommonPlatformOptions)
+    platform_options: CommonPlatformOptions = dc.field(
+        default_factory=CommonPlatformOptions
+    )
     #: Instance descriptors for each instance to run
     instances: List[InstanceConfig] = dc.field(default_factory=list)
 
@@ -570,7 +633,9 @@ class CommonBenchmarkConfig(TemplateConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        assert self.remote_output_dir.is_absolute(), f"Remote output path must be absolute {self.remote_output_dir}"
+        assert (
+            self.remote_output_dir.is_absolute()
+        ), f"Remote output path must be absolute {self.remote_output_dir}"
 
     @classmethod
     def from_common_conf(cls, other: "CommonBenchmarkConfig"):
@@ -588,6 +653,7 @@ class PipelineBenchmarkConfig(CommonBenchmarkConfig):
     """
     User-facing benchmark configuration.
     """
+
     #: Parameterized benchmark generator instructions. This should map (param_name => [values]).
     parameterize: Dict[str, List[ConfigAny]] = dc.field(default_factory=dict)
 
@@ -598,6 +664,7 @@ class BenchmarkRunConfig(CommonBenchmarkConfig):
     Internal benchmark configuration.
     This represents a resolved benchmark run, associated to an ID and set of parameters.
     """
+
     #: Unique benchmark run identifier
     uuid: UUID = dc.field(default_factory=uuid4)
 
@@ -611,9 +678,14 @@ class BenchmarkRunConfig(CommonBenchmarkConfig):
     instance: Optional[InstanceConfig] = None
 
     def __str__(self):
-        common_info = f"params={self.parameters} ns={self.benchmark.handler} aux={self.aux_tasks}"
+        common_info = (
+            f"params={self.parameters} ns={self.benchmark.handler} aux={self.aux_tasks}"
+        )
         if self.g_uuid and self.instance:
-            return f"{self.name} ({self.uuid}/{self.g_uuid}) on {self.instance} " + common_info
+            return (
+                f"{self.name} ({self.uuid}/{self.g_uuid}) on {self.instance} "
+                + common_info
+            )
         else:
             return f"unallocated {self.name} ({self.uuid}) " + common_info
 
@@ -625,6 +697,7 @@ class CommonSessionConfig(TemplateConfig):
     This is shared between the user-facing configuration file format and the
     internal session runfile.
     """
+
     #: Path to the SSH private key to use to access instances
     ssh_key: ConfigPath = Path("~/.ssh/id_rsa")
 
@@ -669,8 +742,11 @@ class PipelineConfig(CommonSessionConfig):
     the templates will be retained in the session instructions file so that
     the substitution can be replicated with a different user configuration every time.
     """
+
     #: Instances configuration, required
-    instance_config: PipelineInstanceConfig = dc.field(default_factory=PipelineInstanceConfig)
+    instance_config: PipelineInstanceConfig = dc.field(
+        default_factory=PipelineInstanceConfig
+    )
 
     #: Benchmark configuration, required
     benchmark_config: List[PipelineBenchmarkConfig] = dc.field(default_factory=list)
@@ -691,6 +767,7 @@ class SessionRunConfig(CommonSessionConfig):
     This unwraps the benchmark parameterization and generates the full set of benchmarks
     to run with the associated instance configurations.
     """
+
     #: Session unique ID
     uuid: UUID = dc.field(default_factory=uuid4)
 
@@ -699,6 +776,9 @@ class SessionRunConfig(CommonSessionConfig):
 
     #: Benchmark run configuration, this is essentially the flattened benchmark matrix
     configurations: List[BenchmarkRunConfig] = dc.field(default_factory=list)
+
+    #: User configuration
+    user_config: BenchplotUserConfig = dc.field(default_factory=BenchplotUserConfig)
 
     def __post_init__(self):
         super().__post_init__()
@@ -711,11 +791,15 @@ class SessionRunConfig(CommonSessionConfig):
         if data["concurrent_instances"] != 1:
             for bench_config in data["configurations"]:
                 if bench_config.instance.platform == InstancePlatform.VCU118:
-                    raise ValidationError("Running on VCU118 instances requires concurrent_instances=1",
-                                          "concurrent_instances")
+                    raise ValidationError(
+                        "Running on VCU118 instances requires concurrent_instances=1",
+                        "concurrent_instances",
+                    )
 
     @classmethod
-    def generate(cls, user_config: BenchplotUserConfig, config: PipelineConfig) -> "SessionRunConfig":
+    def generate(
+        cls, user_config: BenchplotUserConfig, config: PipelineConfig
+    ) -> "SessionRunConfig":
         """
         Generate a new :class:`SessionRunConfig` from a :class:`PipelineConfig`.
         Manual benchmark parameterization is supported by specifying multiple benchmarks with
@@ -738,9 +822,15 @@ class SessionRunConfig(CommonSessionConfig):
         # Collect benchmarks and the instances
         all_conf = []
         # Case (1)
-        if ft.reduce(lambda noparams, conf: noparams or len(conf.parameterize) == 0, config.benchmark_config, False):
+        if ft.reduce(
+            lambda noparams, conf: noparams or len(conf.parameterize) == 0,
+            config.benchmark_config,
+            False,
+        ):
             if len(config.benchmark_config) > 1:
-                logger.error("Multiple benchmark configurations must have a parameterization key")
+                logger.error(
+                    "Multiple benchmark configurations must have a parameterization key"
+                )
                 raise ValueError("Invalid configuration")
             conf = config.benchmark_config[0]
             logger.debug("Found benchmark %s", conf.name)
@@ -755,7 +845,9 @@ class SessionRunConfig(CommonSessionConfig):
                 sorted_params = OrderedDict(conf.parameterize)
                 keys = set(conf.parameterize.keys())
                 if param_keys and param_keys != keys:
-                    logger.error("Mismatching parameterization keys %s != %s", param_keys, keys)
+                    logger.error(
+                        "Mismatching parameterization keys %s != %s", param_keys, keys
+                    )
                     raise ValueError("Invalid configuration")
                 elif param_keys is None:
                     param_keys = keys
@@ -792,6 +884,7 @@ class PlotConfig(Config):
     Plotting configuration.
     This is separated in case it needs to be propagated separately.
     """
+
     #: Generate multiple split plots instead of combining
     split_subplots: bool = False
     #: Output formats

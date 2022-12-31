@@ -1,6 +1,6 @@
 {
     "ssh_key": "extra_files/freebsd_test_id_rsa",
-    "concurrent_instances": 20,
+    "concurrent_instances": 128,
     "reuse_instances": false,
     "instance_config": {
         "instances": [
@@ -29,15 +29,15 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
-                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_rundir": "/root/spec_static/{spec_variant}/{variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "-Idata/all/input/lib data/test/input/op_pat.t"
@@ -60,15 +60,15 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
-                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_rundir": "/root/spec_static/{spec_variant}/{variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "data/test/input/cccp.i -o cccp.s"
@@ -91,15 +91,15 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
-                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_rundir": "/root/spec_static/{spec_variant}/{variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "data/test/input/inp.in"
@@ -122,15 +122,15 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
-                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_rundir": "/root/spec_static/{spec_variant}/{variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "data/test/input/dryer.jpg 2"
@@ -153,15 +153,15 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
-                    "spec_rundir": "/root/spec/{spec_variant}/{variant}/data/all/input",
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_rundir": "/root/spec_static/{spec_variant}/{variant}/data/all/input",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "--quiet --mode gtp < ../../test/input/dniwog.tst"
@@ -184,15 +184,15 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
-                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_rundir": "/root/spec_static/{spec_variant}/{variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "--fixed 0 --mean 325 --num 45000 --sd 200 --seed 0 data/test/input/bombesin.hmm"
@@ -215,15 +215,15 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
-                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_rundir": "/root/spec_static/{spec_variant}/{variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "data/test/input/test.txt"
@@ -246,15 +246,15 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
-                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_rundir": "/root/spec_static/{spec_variant}/{variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "143 25"
@@ -277,14 +277,14 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "-d foreman_test_encoder_baseline.cfg"
@@ -307,14 +307,14 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
                     "spec_benchmark": "{variant}",
                     "spec_workload": "test"
                 }
@@ -334,14 +334,14 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
                         "lake.cfg"
@@ -364,18 +364,18 @@
                 ]
             },
             "command_hooks": {
-                "pre_benchmark": [
+                "pre-benchmark": [
                     "sysctl hw.qemu_trace_perthread=1"
                 ]
             },
             "benchmark": {
                 "handler": "spec",
                 "task_options": {
-                    "spec_path": "/root/spec/{spec_variant}",
-                    "spec_rundir": "/root/spec/{spec_variant}/{variant}",
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_rundir": "/root/spec_static/{spec_variant}/{variant}",
                     "spec_benchmark": "{variant}",
                     "spec_benchmark_options": [
-                        "-v data/test/input/test.xml data/test/input/test.xsl"
+                        "-v data/test/input/test.xml data/test/input/xalanc.xsl"
                     ],
                     "spec_workload": "test"
                 }

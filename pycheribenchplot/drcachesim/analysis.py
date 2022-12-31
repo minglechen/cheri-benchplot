@@ -6,6 +6,7 @@ from pathlib import Path
 from ..core.analysis import AnalysisTask, AnalysisConfig
 from ..core.config import ConfigPath, TemplateConfig, Config
 from .task import DrCaheSimRunTask, DrCacheSimRunConfig
+from ..addr2line.task import Addr2LineTask, Addr2LineConfig
 
 
 @dataclass
@@ -19,72 +20,15 @@ class DrCacheSimConfig(TemplateConfig):
     rerun_sim: bool = False
 
 
-# class DrCacheSimRun(BenchmarkAnalysis):
-#     require = {DatasetName.QEMU_DYNAMORIO}
-#     name: str = "drcachesim"
-#     description: str = "Run drcachesim"
-#     analysis_options_class = DrCacheSimConfig
-
-#     def __init__(self, benchmark, config):
-#         super().__init__(benchmark, config)
-#         self.processes_dict = {}
-
-#     async def _run_drcachesim(self, level_arg, size, indir, out_path):
-#         if os.path.isfile(out_path) and not self.config.rerun_sim:
-#             return
-#         p = await aio.create_subprocess_exec(self.config.drrun_path,
-#                                              '-t',
-#                                              'drcachesim',
-#                                              '-indir',
-#                                              indir,
-#                                              '-' + level_arg,
-#                                              size,
-#                                              stderr=aio.subprocess.PIPE)
-#         self.processes_dict[p] = out_path
-
-#     async def process_datasets(self):
-#         dset = self.get_dataset(DatasetName.QEMU_DYNAMORIO)
-#         trace_file = dset.output_file()
-#         indir = trace_file.parent
-#         base = dset.cachesim_output_dir()
-#         if self.config.remove_saved_results:
-#             shutil.rmtree(str(base), ignore_errors=True)
-#         if not base.exists():
-#             base.mkdir(parents=True)
-
-#         self.logger.info(f"Running drcachesim")
-#         for level in self.config.run_cache_levels:
-#             if level == 'LL':
-#                 sizes = self.config.LL_cache_sizes
-#                 out_path = base / "LL_size"
-#                 out_path.mkdir(exist_ok=True)
-#                 for s in sizes:
-#                     await self._run_drcachesim("LL_size", s, indir, out_path / f"{s}.txt")
-#             elif level == 'L1D':
-#                 sizes = self.config.L1D_cache_sizes
-#                 out_path = base / "L1D_size"
-#                 out_path.mkdir(exist_ok=True)
-#                 for s in sizes:
-#                     await self._run_drcachesim("L1D_size", s, indir, out_path / f"{s}.txt")
-#             elif level == 'L1I':
-#                 sizes = self.config.L1I_cache_sizes
-#                 out_path = base / "L1I_size"
-#                 out_path.mkdir(exist_ok=True)
-#                 for s in sizes:
-#                     await self._run_drcachesim("L1I_size", s, indir, out_path / f"{s}.txt")
-#             else:
-#                 self.logger.error(f"Unknown cache level {level}")
-
-#         for kvp in self.processes_dict.items():
-#             p = kvp[0]
-#             size = kvp[1]
-#             err = (await p.communicate())[1]
-#             with open(self.out_paths[size], "w") as f:
-#                 f.write(err.decode())
-#         self.logger.info(f"Finished drcachesim")
+@dataclass
+class InstrCountRunConfig(TemplateConfig):
+    drrun_path: ConfigPath = Path("dynamorio/bin64/drrun")
+    remove_saved_results: bool = False
 
 
 class DrCacheSimAnalyseTask(AnalysisTask):
+    """Utility task to run drcachesim cache simulator on different configurations"""
+
     public = True
     task_name = "drcachesim"
     task_namespace = "drcachesim-run"
@@ -152,3 +96,53 @@ class DrCacheSimAnalyseTask(AnalysisTask):
 
     def run(self):
         self.logger.info(f"Finished drcachesim analysis")
+
+
+class InstrCountAnalyseTask(AnalysisTask):
+    """Utility task to run drcachesim instr count on spec benchmarks"""
+
+    public = True
+    task_name = "instr_count"
+    task_namespace = "drcachesim-run"
+    task_config_class: typing.Type[Config] = InstrCountRunConfig
+
+    def dependencies(self) -> typing.Iterable["Task"]:
+        for multi_ind in self.session.benchmark_matrix.index.values:
+            for benchmark in self.session.benchmark_matrix.loc[multi_ind]:
+                data_path = benchmark.get_benchmark_data_path()
+                variant, spec_variant = multi_ind
+                base = data_path / "drcachesim-results"
+                indir = data_path / "qemu-trace" / "qemu-trace-dir"
+                out_path = base / "instr_count"
+                addr2line_path = base / "addr2line.csv"
+                if self.config.remove_saved_results:
+                    shutil.rmtree(str(out_path), ignore_errors=True)
+                if not out_path.exists():
+                    out_path.mkdir(parents=True)
+
+                out_path.mkdir(exist_ok=True)
+                cachesim_config = DrCacheSimRunConfig(
+                    drrun_path=self.config.drrun_path,
+                    simulator="instr_count",
+                    indir=indir,
+                    addr2line_file=addr2line_path,
+                    output_dir=out_path,
+                )
+                addr2line_config = Addr2LineConfig(
+                    obj_path=self.session.user_config.cheribsd_extra_files_path
+                    / "root"
+                    / "spec_static"
+                    / spec_variant
+                    / variant
+                    / variant,
+                    output_path=addr2line_path,
+                )
+                yield Addr2LineTask(self.session, addr2line_config)
+                out_file = out_path / "instr_counts.csv"
+                if not out_file.is_file():
+                    yield DrCaheSimRunTask(
+                        cachesim_config,
+                    )
+
+    def run(self):
+        self.logger.info(f"Finished instrcount analysis")

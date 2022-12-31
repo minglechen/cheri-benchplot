@@ -21,6 +21,8 @@ import pycheribenchplot.netperf.plot
 import pycheribenchplot.netperf.task
 import pycheribenchplot.drcachesim.analysis
 import pycheribenchplot.drcachesim.task
+import pycheribenchplot.drcachesim.plot
+import pycheribenchplot.addr2line.task
 import pycheribenchplot.spec.task
 
 # import pycheribenchplot.netstat.dataset

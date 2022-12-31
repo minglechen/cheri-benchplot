@@ -38,8 +38,7 @@
                     "LL"
                 ],
                 "drrun_path": "/local/scratch/mc2262/dynamorio/build/bin64/drrun",
-                "remove_saved_results": false,
-                "rerun_sim": false
+                "remove_saved_results": false
             }
         }
     ]

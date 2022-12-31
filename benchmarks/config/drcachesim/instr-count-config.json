@@ -1,0 +1,21 @@
+{
+    "handlers": [
+        {
+            "handler": "analysis.plot.instr-count-plot",
+            "task_options": {
+                "drrun_path": "/local/scratch/mc2262/dynamorio/build/bin64/drrun",
+                "benchmark_param_name": "variant",
+                "variant_param_name": "spec_variant",
+                "group_level": "line"
+            }
+        },
+        {
+            "handler": "analysis.plot.static-instr-count-plot",
+            "task_options": {
+                "benchmark_param_name": "variant",
+                "variant_param_name": "spec_variant",
+                "group_level": "line"
+            }
+        }
+    ]
+}
