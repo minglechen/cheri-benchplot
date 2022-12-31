@@ -10,6 +10,7 @@ from threading import Condition, Event, Lock, Semaphore, Thread
 
 import networkx as nx
 import pandas as pd
+import pandera as pa
 
 from .config import AnalysisConfig, Config
 from .util import new_logger
@@ -108,167 +109,6 @@ class Target:
         """
         When true, the target should be a subclass of :class:`FileTarget`
         """
-        return False
-
-
-class DataFrameTarget(Target):
-    """
-    Target wrapping an output dataframe from a task.
-    """
-
-    def __init__(self, model: "DataModel", df: pd.DataFrame):
-        self.model = model
-        self.df = df
-
-
-class PlotTarget(Target):
-    """
-    Target pointing to a plot path
-    """
-
-    def __init__(self, path):
-        self.path = path
-
-
-class FileTarget(Target):
-    """
-    Base class for a target output file.
-    """
-
-    @classmethod
-    def from_task(cls, task: "Task", prefix: str = None, ext: str = None, **kwargs):
-        """
-        Create a task path using the task identifier and the parent session data root path.
-
-        :param task: The task that generates this file
-        :param prefix: Additional name used to generate the filename, in case the task generates
-        multiple files
-        :param ext: Optional file extension
-        :param `**kwargs`: Forwarded arguments to the :class:`FileTarget` constructor.
-        """
-        name = re.sub(r"\.", "-", task.task_id)
-        if prefix:
-            name = f"{prefix}-{name}"
-        path = Path(name)
-
-        if ext:
-            if not ext.startswith("."):
-                ext = "." + ext
-            path = path.with_suffix(ext)
-        return cls(task.benchmark, path, **kwargs)
-
-    def __init__(
-        self,
-        benchmark,
-        path: Path,
-        has_iteration_path: bool = False,
-        use_data_root: bool = False,
-    ):
-        """
-        :param benchmark: The benchmark context this file belongs to
-        :param path: The file relative path from the benchmark output data directory.
-        :param per_iteration: Whether the file is replicated for each iteration
-        :param use_data_root: Whether to use the session data root path instead of the per-benchmark data path.
-            This is useful for files that do not belong to a single benchmark.
-        """
-        self.benchmark = benchmark
-        self.has_iteration_path = has_iteration_path
-        self.use_data_root = use_data_root
-        self._path = path
-
-    @property
-    def path(self) -> Path:
-        """
-        Shorthand to return the path for targets that do not depend on iterations.
-        If the path depends on the iteration index, this raises a TypeError.
-        """
-        if self.has_iteration_path:
-            raise ValueError(
-                "Can not use shorthand path property when multiple paths are present"
-            )
-        return self.paths[0]
-
-    @property
-    def remote_path(self) -> Path:
-        """
-        Shorthand to return the path for targets that do not depend on iterations.
-        If the path depends on the iteration index, this raises a TypeError.
-        """
-        raise NotImplementedError("Must override")
-
-    @property
-    def paths(self) -> list[Path]:
-        """
-        Return a list of paths belonging to this target.
-        If the path depends on the benchmark iteration, this returns all paths sorted
-        by iteration number.
-        If the path does not depend on iterations, this only returns the path.
-        """
-        if not self.has_iteration_path:
-            if self.use_data_root:
-                base = self.benchmark.session.get_data_root_path()
-            else:
-                base = self.benchmark.get_benchmark_data_path()
-            return [base / self._path]
-        if self.use_data_root:
-            raise NotImplementedError(
-                "Using the data root path for iteration output is not yet supported"
-            )
-        base_paths = map(
-            self.benchmark.get_benchmark_iter_data_path,
-            range(self.benchmark.config.iterations),
-        )
-        return [path / self._path for path in base_paths]
-
-    @property
-    def remote_paths(self) -> list[Path]:
-        """
-        Same as path but all paths are coverted rebased to the guest data output directory
-        """
-        raise NotImplementedError("Must override")
-
-    def is_file(self):
-        return True
-
-    def needs_extraction(self):
-        raise NotImplementedError("Must override")
-
-
-class DataFileTarget(FileTarget):
-    """
-    A target output file that is generated on the guest and needs to be extracted.
-    """
-
-    @property
-    def remote_path(self):
-        base = self.benchmark.get_benchmark_data_path()
-        guest_base = self.benchmark.config.remote_output_dir
-        return guest_base / self.path.relative_to(base)
-
-    @property
-    def remote_paths(self):
-        base = self.benchmark.get_benchmark_data_path()
-        guest_base = self.benchmark.config.remote_output_dir
-        return [guest_base / path.relative_to(base) for path in self.paths]
-
-    def needs_extraction(self):
-        return True
-
-
-class LocalFileTarget(FileTarget):
-    """
-    A target output file that is generated on the host and does not need to be extracted
-    """
-
-    @property
-    def remote_path(self):
-        raise TypeError("LocalFileTarget does not have a corresponding remote path")
-
-    @property
-    def remote_paths(self):
-        raise TypeError("LocalFileTarget does not have a corresponding remote path")
-
-    def needs_extraction(self):
         return False
 
 
@@ -416,8 +256,10 @@ class Task(metaclass=TaskRegistry):
         interface for other tasks to fetch targets and outputs of this task.
         The name/target pairs may be used to construct a dictionary to access the return values by key.
 
-        XXX consider making outputs classmethods or recording run tasks outputs somewhere, it is
-        annoying to instantiate the tasks just to get the outputs, which may well be dynamic anyway.
+        Note that this method generates output descriptors, not output data. The descriptors may be dynamic but
+        must be determined independently of :meth:`Task.run`. This allows to use cached outputs in the future, and
+        avoid calling :meth:`Task.run` altogether. The :meth:`Task.run` is responsible for producing the output
+        data and setting it to the output_map, if needed.
         """
         yield from []
 
@@ -425,7 +267,50 @@ class Task(metaclass=TaskRegistry):
         raise NotImplementedError("Task.run() must be overridden")
 
 
-class ExecutionTask(Task):
+class SessionTask(Task):
+    """
+    Base class for all tasks that are unique within a session.
+
+    These tasks do not reference a specific benchmark ID or benchmark group ID.
+    """
+    def __init__(self, session: "Session", task_config: Config = None):
+        super().__init__(task_config=task_config)
+        self._session = session
+        #: Task logger is a child of the session logger
+        self.logger = new_logger(f"{self.task_name}", parent=session.logger)
+
+    @property
+    def session(self):
+        return self._session
+
+    @property
+    def task_id(self):
+        return f"{self.task_namespace}.{self.task_name}-{self.session.uuid}"
+
+
+class BenchmarkTask(Task):
+    """
+    Base class for all tasks that are unique within a session.
+
+    These tasks do not reference a specific benchmark ID or benchmark group ID.
+    """
+    def __init__(self, benchmark: "Benchmark", task_config: Config = None):
+        super().__init__(task_config=task_config)
+        #: Associated benchmark context
+        self.benchmark = benchmark
+        #: Task logger is a child of the benchmark logger
+        self.logger = new_logger(f"{self.task_name}", parent=self.benchmark.logger)
+
+    @property
+    def session(self):
+        return self.benchmark.session
+
+    @property
+    def task_id(self):
+        return f"{self.task_namespace}.{self.task_name}-{self.benchmark.uuid}"
+
+
+class ExecutionTask(BenchmarkTask):
     """
     Base class for tasks that are scheduled as dependencies of the main internal benchmark
     run task.
@@ -440,29 +325,20 @@ class ExecutionTask(Task):
     1. Extract any static information from benchmark binary files.
     2. Configure the benchmark instance via platform_options.
     3. Add commands to the benchmark run script sections.
+
+    Note that the task_id generation currently assumes that tasks with the same name are not issued
+    more than once for each benchmark run UUID. If this is violated, we need to
+    change the task ID generation.
     """
 
     task_name = "exec"
     #: Whether the task requires a running VM instance or not. Instead of changing this use :class:`DataGenTask`.
     require_instance = True
 
-    def __init__(
-        self,
-        benchmark: "Benchmark",
-        script: "ScriptBuilder",
-        task_config: Config = None,
-    ):
-        super().__init__(task_config=task_config)
-        #: Associated benchmark context
-        self.benchmark = benchmark
+    def __init__(self, benchmark: "Benchmark", script: "ScriptBuilder", task_config: Config = None):
+        super().__init__(benchmark, task_config=task_config)
         #: Script builder associated to the current benchmark context.
         self.script = script
-        #: Make the logger a child of the benchmark logger
-        self.logger = new_logger(f"{self.task_name}", parent=self.benchmark.logger)
-
-    @property
-    def session(self):
-        return self.benchmark.session
 
     @property
     def uuid(self):
@@ -472,14 +348,20 @@ class ExecutionTask(Task):
     def g_uuid(self):
         return self.benchmark.g_uuid
 
+
+class SessionExecutionTask(SessionTask):
+    """
+    Execution task that only exists as a single instance within a session.
+    This can be used for data generation that is independent from the benchmark
+    configurations.
+    """
     @property
-    def task_id(self):
-        """
-        Note that this currently assumes that tasks with the same name are not issued
-        more than once for each benchmark run UUID. If this is violated, we need to
-        change the task ID generation.
-        """
-        return f"{self.task_namespace}.{self.task_name}-{self.benchmark.uuid}"
+    def uuid(self):
+        raise TypeError("Task.uuid is invalid on SessionExecutionTask")
+
+    @property
+    def g_uuid(self):
+        raise TypeError("Task.g_uuid is invalid on SessionExecutionTask")
 
 
 class DataGenTask(ExecutionTask):
@@ -490,45 +372,210 @@ class DataGenTask(ExecutionTask):
     DataGenTasks should not depend on execution tasks, this is to avoid scanning the whole dependency tree
     to determine whether we need to request an instance or not, however the reverse is allowed.
     """
-
-    #: Whether the task requires a running VM instance or not.
     require_instance = False
 
 
-class AnalysisTask(Task):
+class SessionDataGenTask(SessionExecutionTask):
+    """
+    Same as a DataGenTask, but is unique within a session.
+    """
+    require_instance = False
+
+
+class AnalysisTask(SessionTask):
     """
     Analysis tasks that perform anythin from plotting to data checks and transformations.
     This is the base class for all public analysis steps that are allocated by the session.
     Analysis tasks are not necessarily associated to a single benchmark. In general they reference the
     current session and analysis configuration, subclasses may be associated to a benchmark context.
+
+    Note that this currently assumes that tasks with the same name are not issued
+    more than once for each benchmark run UUID. If this is violated, we need to
+    change the task ID generation.
     """
 
     task_namespace = "analysis"
 
-    def __init__(
-        self,
-        session: "Session",
-        analysis_config: AnalysisConfig,
-        task_config: Config = None,
-    ):
-        super().__init__(task_config=task_config)
-        #: The current session
-        self._session = session
+    def __init__(self, session: "Session", analysis_config: AnalysisConfig, task_config: Config = None):
+        super().__init__(session, task_config=task_config)
         #: Analysis configuration for this invocation
         self.analysis_config = analysis_config
 
-    @property
-    def session(self):
-        return self._session
+
+class DataFrameTarget(Target):
+    """
+    Target wrapping an output dataframe from a task.
+    """
+    def __init__(self, schema: pa.DataFrameSchema):
+        self.schema = schema
+        self._df = None
+
+    def assign(self, df: pd.DataFrame):
+        self._df = self.schema.validate(df)
+
+    def get(self) -> pd.DataFrame:
+        return self._df.copy()
+
+
+class FileTarget(Target):
+    """
+    Base class for a target output file.
+
+    The factory methods should be used to generate paths for the file targets.
+    """
+    @classmethod
+    def from_task(cls, task: SessionTask | BenchmarkTask, prefix: str = None, ext: str = None, **kwargs) -> "Self":
+        """
+        Create a task path using the task identifier and the parent session data root path.
+
+        :param task: The task that generates this file
+        :param prefix: Additional name used to generate the filename, in case the task generates
+        multiple files
+        :param ext: Optional file extension
+        :param `**kwargs`: Forwarded arguments to the :class:`FileTarget` constructor.
+        :returns: The file target
+        """
+        name = re.sub(r"\.", "-", task.task_id)
+        if prefix:
+            name = f"{prefix}-{name}"
+        path = Path(name)
+
+        if ext:
+            if not ext.startswith("."):
+                ext = "." + ext
+            path = path.with_suffix(ext)
+
+        if isinstance(task, SessionTask):
+            return cls.from_session(task.session, path, **kwargs)
+        elif isinstance(task, BenchmarkTask):
+            return cls.from_benchmark(task.benchmark, path, **kwargs)
+        else:
+            raise TypeError(f"Invalid task type {task.__class__}")
+
+    @classmethod
+    def from_session(cls, session: "Session", path: Path) -> "Self":
+        """
+        Build a file target descriptor from a session.
+
+        The descriptor will point to a single file in the session data root path.
+        :param session: The target session
+        :param path: The target file name
+        :returns: The file target
+        """
+        raise NotImplementedError("Must override")
+
+    @classmethod
+    def from_benchmark(cls, benchmark: "Benchmark", path: Path, use_iterations: bool = False) -> "Self":
+        """
+        Build a file target descriptor for a benchmark.
+
+        The descriptor will point to one or more files in the benchmark data root.
+        If the iterations parameter is set, the descriptor will map to multiple files,
+        one for each benchmark iteration.
+        :param benchmark: The target benchmark
+        :param path: The target file name
+        :param use_iterations: Generate multiple files, one per iteration.
+        :returns: The file target
+        """
+        raise NotImplementedError("Must override")
+
+    def __init__(self, paths: list[Path], remote_paths: list[Path] | None = None, use_iterations: bool = False):
+        self._paths = paths
+        self._remote_paths = remote_paths
+        self.use_iterations = use_iterations
 
     @property
-    def task_id(self):
+    def path(self) -> Path:
         """
-        Note that this currently assumes that tasks with the same name are not issued
-        more than once for each benchmark run UUID. If this is violated, we need to
-        change the task ID generation.
+        Shorthand to return the path for targets that do not depend on iterations.
+        If the path depends on the iteration index, and there are multiple paths available, this raises a TypeError.
         """
-        return f"{self.task_namespace}.{self.task_name}-{self.session.uuid}"
+        if len(self._paths) > 1:
+            raise ValueError("Can not use shorthand path property when multiple paths are present")
+        return self._paths[0]
+
+    @property
+    def paths(self) -> list[Path]:
+        return list(self._paths)
+
+    @property
+    def remote_path(self) -> Path:
+        """
+        Shorthand to return the path for targets that do not depend on iterations.
+        If the path depends on the iteration index, this raises a TypeError.
+        """
+        if len(self._paths) > 1:
+            raise ValueError("Can not use shorthand remote_path property when multiple paths are present")
+        return self.remote_paths[0]
+
+    @property
+    def remote_paths(self) -> list[Path]:
+        """
+        Same as path but all paths are coverted rebased to the guest data output directory
+        """
+        assert self.needs_extraction(), "Can not use remote paths if file does not need extraction"
+        return list(self._remote_paths)
+
+    def is_file(self):
+        return True
+
+    def needs_extraction(self):
+        raise NotImplementedError("Must override")
+
+
+class DataFileTarget(FileTarget):
+    """
+    A target output file that is generated on the guest and needs to be extracted.
+    """
+    @classmethod
+    def from_session(cls, session: "Session", path: Path) -> FileTarget:
+        raise TypeError("DataFileTarget does not support session-wide scope, only benchmark scope")
+
+    @classmethod
+    def from_benchmark(cls, benchmark: "Benchmark", path: Path, use_iterations: bool = False) -> FileTarget:
+        benchmark_data_root = benchmark.get_benchmark_data_path()
+        guest_data_root = benchmark.config.remote_output_dir
+        if use_iterations:
+            base_paths = map(benchmark.get_benchmark_iter_data_path, range(benchmark.config.iterations))
+            local = [base / path for base in base_paths]
+            remote = [guest_data_root / p.relative_to(benchmark_data_root) for p in local]
+        else:
+            local = [benchmark_data_root / path]
+            remote = [guest_data_root / path]
+        return cls(local, remote, use_iterations=use_iterations)
+
+    def needs_extraction(self):
+        return True
+
+
+class LocalFileTarget(FileTarget):
+    """
+    A target output file that is generated on the host and does not need to be extracted
+    """
+    @classmethod
+    def from_session(cls, session: "Session", path: Path) -> FileTarget:
+        return cls([session.get_data_root_path() / path])
+
+    @classmethod
+    def from_benchmark(cls, benchmark: "Benchmark", path: Path, use_iterations: bool = False) -> FileTarget:
+        benchmark_data_root = benchmark.get_benchmark_data_path()
+        if use_iterations:
+            base_paths = map(benchmark.get_benchmark_iter_data_path, range(benchmark.config.iterations))
+            local = [base / path for base in base_paths]
+        else:
+            local = [benchmark_data_root / path]
+        return cls(local)
+
+    def needs_extraction(self):
+        return False
+
+
+class PlotTarget(Target):
+    """
+    Target pointing to a plot path
+    """
+    def __init__(self, path):
+        self.path = path
 
 
 class ResourceManager:

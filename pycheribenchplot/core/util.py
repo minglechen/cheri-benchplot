@@ -160,7 +160,7 @@ class SubprocessHelper:
 
     def start(self, **popen_kwargs):
         assert self._subprocess is None, "multiple start()"
-        self.logger.debug("Subcommand: %s %s", self.executable, " ".join(self.args))
+        self.logger.debug("Subcommand: %s %s", self.executable, " ".join(map(str, self.args)))
         self._subprocess = subprocess.Popen([self.executable] + self.args,
                                             env=self.env,
                                             stdout=subprocess.PIPE,

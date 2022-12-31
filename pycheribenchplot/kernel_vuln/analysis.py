@@ -9,7 +9,7 @@ from matplotlib.ticker import AutoMinorLocator, LinearLocator
 from pycheribenchplot.core.analysis import PlotTask
 from pycheribenchplot.core.config import (Config, ConfigPath, validate_path_exists)
 from pycheribenchplot.core.plot import new_figure
-from pycheribenchplot.core.task import (AnalysisTask, DataFrameTarget, DataGenTask, LocalFileTarget, PlotTarget)
+from pycheribenchplot.core.task import (AnalysisTask, DataFrameTarget, LocalFileTarget, PlotTarget, SessionDataGenTask)
 from pycheribenchplot.kernel_vuln.model import (CheriBSDAdvisories, CheriBSDUnmitigated, History, Marker)
 
 
@@ -21,7 +21,7 @@ class CheriBSDKernelVulnConfig(Config):
     unmitigated_file: ConfigPath = field(metadata={"validate": validate_path_exists})
 
 
-class CheriBSDKernelVuln(DataGenTask):
+class CheriBSDKernelVuln(SessionDataGenTask):
     """
     This task interprets and freezes a table from the CSV kernel vulnerability classification.
     The input is compiled separately but this is used to ingest it for plotting in a way that
@@ -33,13 +33,13 @@ class CheriBSDKernelVuln(DataGenTask):
     task_config_class = CheriBSDKernelVulnConfig
 
     def _output_target(self) -> LocalFileTarget:
-        return LocalFileTarget.from_task(self, use_data_root=True, ext="csv")
+        return LocalFileTarget.from_task(self, ext="csv")
 
     def _output_history(self) -> LocalFileTarget:
-        return LocalFileTarget.from_task(self, use_data_root=True, prefix="history", ext="csv")
+        return LocalFileTarget.from_task(self, prefix="history", ext="csv")
 
     def _output_unmitigated(self) -> LocalFileTarget:
-        return LocalFileTarget.from_task(self, use_data_root=True, prefix="unmitigated", ext="csv")
+        return LocalFileTarget.from_task(self, prefix="unmitigated", ext="csv")
 
     def _normalize_input_colname(self, column_name: str) -> str:
         """
@@ -127,20 +127,20 @@ class CheriBSDKernelVulnLoad(AnalysisTask):
         task = CheriBSDKernelVuln(self.session.benchmark_matrix.iloc[0, 0], None)
         advisories = task.output_map["advisories"]
         df = pd.read_csv(advisories.path, index_col=["date", "advisory"])
-        self.df = CheriBSDAdvisories.to_schema(self.session).validate(df)
+        self.output_map["df"].assign(df)
 
         history = task.output_map["history"]
         df = pd.read_csv(history.path, index_col=["date"])
-        self.history_df = History.to_schema(self.session).validate(df)
+        self.output_map["history_df"].assign(df)
 
         unmitigated = task.output_map["unmitigated"]
         df = pd.read_csv(unmitigated.path, index_col=["date", "unmitigated_advisory"])
-        self.unmitigated_df = CheriBSDUnmitigated.to_schema(self.session).validate(df)
+        self.output_map["unmitigated_df"].assign(df)
 
     def outputs(self):
-        yield "df", DataFrameTarget(CheriBSDAdvisories, self.df)
-        yield "history_df", DataFrameTarget(History, self.history_df)
-        yield "unmitigated_df", DataFrameTarget(CheriBSDUnmitigated, self.unmitigated_df)
+        yield "df", DataFrameTarget(CheriBSDAdvisories.to_schema(self.session))
+        yield "history_df", DataFrameTarget(History.to_schema(self.session))
+        yield "unmitigated_df", DataFrameTarget(CheriBSDUnmitigated.to_schema(self.session))
 
 
 class CheriBSDAdvisoriesHistory(PlotTask):
@@ -156,8 +156,8 @@ class CheriBSDAdvisoriesHistory(PlotTask):
         yield self._sa_load
 
     def run(self):
-        df = self._sa_load.output_map["df"].df.copy()
-        history = self._sa_load.output_map["history_df"].df.copy()
+        df = self._sa_load.output_map["df"].get()
+        history = self._sa_load.output_map["history_df"].get()
 
         df["year"] = df.index.get_level_values("date").year
         df["advisory"] = df.index.get_level_values("advisory")

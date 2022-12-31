@@ -13,7 +13,7 @@ def test_shellgen_base(fake_simple_benchmark):
     in each section.
     """
     script = ScriptBuilder(fake_simple_benchmark)
-    target = DataFileTarget(fake_simple_benchmark, fake_simple_benchmark.get_benchmark_iter_data_path(1) / "test-file")
+    target = DataFileTarget.from_benchmark(fake_simple_benchmark, "test-file")
 
     # Check that we generated the correct number of sections
     assert len(script.sections["benchmark"]) == 2  # number of iterations in the fixture config
@@ -30,7 +30,7 @@ def test_shellgen_base(fake_simple_benchmark):
     result.seek(0)
     expect = [
         r"#!/bin/sh", r"test-pre foo bar", r"cpuset -c -l 2 test-pre-i0",
-        r"test-i1 >> /root/benchmark-output/1/test-file", r"KEY=VALUE test-post 100", r"test-last"
+        r"test-i1 >> /root/benchmark-output/test-file", r"KEY=VALUE test-post 100", r"test-last"
     ]
     expect_next = 0
     for line in result:

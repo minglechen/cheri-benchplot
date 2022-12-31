@@ -158,9 +158,7 @@ class BenchmarkDataLoadTask(BenchmarkAnalysisTask):
             # We could support empty data but there is no use case for it now.
             self.logger.error("No data has been loaded for %s", self)
             raise ValueError("Loader did not find any data")
-        schema = self.model.to_schema(self.session)
-        df = pd.concat(self._df)
-        return schema.validate(df)
+        return pd.concat(self._df)
 
     def _append_df(self, df: pd.DataFrame):
         """
@@ -229,16 +227,17 @@ class BenchmarkDataLoadTask(BenchmarkAnalysisTask):
             if not path.exists():
                 self.logger.error("Can not load %s, does not exist", path)
                 raise FileNotFoundError(f"{path} does not exist")
-            if not target.has_iteration_path:
+            if not target.use_iterations:
                 i = -1
             self._load_one(path, i)
+        self.output_map["df"].assign(self._output_df())
 
     def outputs(self):
         """
         Note that the target data will be valid only after the Task.completed
         flag has been set.
         """
-        yield "df", DataFrameTarget(self.model, self._output_df())
+        yield "df", DataFrameTarget(self.model.to_schema(self.session))
 
 
 class StatsByParamGroupTask(ParamGroupAnalysisTask):
@@ -420,18 +419,20 @@ class StatsByParamGroupTask(ParamGroupAnalysisTask):
         """
         to_merge = []
         for loader in self.resolved_dependencies:
-            to_merge.append(loader.output_map["df"].df)
+            to_merge.append(loader.output_map["df"].get())
         merged_df = pd.concat(to_merge)
         merged_df = self.load_task.model.to_schema(self.session).validate(merged_df)
         merged_df.columns.name = "metric"
-        self._merged_df = self._transform_merged(merged_df)
-        agg_df = self._transform_aggregate(self._merged_df)
+        merged_df = self._transform_merged(merged_df)
+        agg_df = self._transform_aggregate(merged_df)
         delta_df = self._transform_delta(agg_df)
-        self._df = delta_df
+
+        self.output_map["merged_df"].assign(merged_df)
+        self.output_map["df"].assign(delta_df)
 
     def outputs(self):
-        yield "merged_df", DataFrameTarget(self.load_task.model, self._merged_df)
-        yield "df", DataFrameTarget(self.model, self._output_df())
+        yield "merged_df", DataFrameTarget(self.load_task.model.to_schema(self.session))
+        yield "df", DataFrameTarget(self.model.to_schema(self.session))
 
 
 def StatsField(name, **kwargs):
@@ -481,12 +482,12 @@ class StatsForAllParamSetsTask(AnalysisTask):
         unaggregated_frames = []
         stats_frames = []
         for stats_task in self.resolved_dependencies:
-            unaggregated_frames.append(stats_task.output_map["merged_df"].df)
-            stats_frames.append(stats_task.output_map["df"].df)
-        self._merged_df = pd.concat(unaggregated_frames)
-        self._df = pd.concat(stats_frames)
+            unaggregated_frames.append(stats_task.output_map["merged_df"].get())
+            stats_frames.append(stats_task.output_map["df"].get())
+        merged_df = pd.concat(unaggregated_frames)
+        self.output_map["merged_df"].assign(merged_df)
+        self.output_map["df"].assign(stats_frames)
 
     def outputs(self):
-        # re-validate this as well?
-        yield "merged_df", DataFrameTarget(self.stats_task.load_task.model, self._merged_df)
-        yield "df", DataFrameTarget(self.model, self._output_df())
+        yield "merged_df", DataFrameTarget(self.stats_task.load_task.model.to_schema(self.session))
+        yield "df", DataFrameTarget(self.model.to_schema(self.session))

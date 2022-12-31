@@ -26,7 +26,7 @@ class DummyInstance(Instance):
 
 @pytest.fixture
 def manager(pytestconfig, mocker, fake_session):
-    if pytestconfig.option.quiet:
+    if hasattr(pytestconfig.option, "quiet"):
         logger = logging.getLogger("cheri-benchplot")
         logger.setLevel(logging.CRITICAL)
     mock_resolve_instance = mocker.patch.object(InstanceManager, "_find_instance_type")

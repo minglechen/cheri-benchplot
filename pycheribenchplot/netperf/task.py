@@ -41,11 +41,11 @@ class NetperfExecTask(ExecutionTask):
         self.logger.debug("Using %s %s", self.netperf_bin, self.netserver_bin)
 
     def get_stats_target(self):
-        return DataFileTarget.from_task(self, has_iteration_path=True, ext="csv")
+        return DataFileTarget.from_task(self, use_iterations=True, ext="csv")
 
     def get_hwpmc_target(self) -> Path:
         """The remote profiling output target"""
-        return DataFileTarget.from_task(self, prefix="hwpmc", has_iteration_path=True, ext="csv")
+        return DataFileTarget.from_task(self, prefix="hwpmc", use_iterations=True, ext="csv")
 
     def dependencies(self):
         if self.config.profile.qemu_trace:

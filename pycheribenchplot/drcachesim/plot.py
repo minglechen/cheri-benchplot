@@ -216,7 +216,6 @@ class InstrCountPlot(PlotTask):
 
 @dataclass
 class StaticInstrCountPlotConfig(TemplateConfig):
-    drrun_path: Path = field(default_factory=Path)
     benchmark_param_name: str = "variant"
     variant_param_name: str = "spec_variant"
     #: The group level (e.g. "line" or "symbol")

@@ -169,7 +169,8 @@ def test_param_group_simple_run(mocker, register_tasks, full_session):
         "param0": ["param0-value1"] * N,
         "count": np.random.normal(loc=10, size=N)
     }).set_index(["dataset_id", "dataset_gid", "iteration", "param0"])
-    target0 = DataFrameTarget(DummyModel, input_df0)
+    target0 = DataFrameTarget(DummyModel.to_schema(full_session))
+    target0.assign(input_df0)
     input_df1 = pd.DataFrame({
         "dataset_id": ["f011e12b-75ef-4174-ba38-2795c2ca1e30"] * N,
         "dataset_gid": ["4995a8b2-4852-4310-9b34-26cbd28494f0"] * N,
@@ -177,7 +178,8 @@ def test_param_group_simple_run(mocker, register_tasks, full_session):
         "param0": ["param0-value1"] * N,
         "count": np.random.normal(loc=100, size=N),
     }).set_index(["dataset_id", "dataset_gid", "iteration", "param0"])
-    target1 = DataFrameTarget(DummyModel, input_df1)
+    target1 = DataFrameTarget(DummyModel.to_schema(full_session))
+    target1.assign(input_df1)
 
     # Simulate computed dependencies
     task_load_0 = mocker.Mock(spec=DummyLoadTask)
@@ -194,7 +196,7 @@ def test_param_group_simple_run(mocker, register_tasks, full_session):
 
     # Given that we used two normal distributions with sigma=1 we can predict the
     # resulting std_delta and std_norm_delta
-    result = task.output_map["df"].df
+    result = task.output_map["df"].get()
 
     schema = ValidateStats.to_schema(full_session)
     validated = schema.validate(result)

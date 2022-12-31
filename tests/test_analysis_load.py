@@ -17,7 +17,7 @@ class DummyExecTask(ExecutionTask):
         pass
 
     def outputs(self):
-        yield "test-target", LocalFileTarget(self.benchmark, "fake-path.csv")
+        yield "test-target", LocalFileTarget.from_benchmark(self.benchmark, "fake-path.csv")
 
 
 class DummyModel(DataModel):
@@ -101,7 +101,8 @@ def test_simple_load_task(csv_file_content, fake_analysis_session):
     assert expect_id in tasks
     load_task = tasks[expect_id]
     target = load_task.output_map["df"]
+    df = target.get()
     assert isinstance(target, DataFrameTarget)
-    assert target.df.index.names == ["dataset_id", "dataset_gid", "iteration", "param_key", "number"]
-    assert (target.df.columns == ["name", "surname"]).all()
-    assert len(target.df) == 4
+    assert df.index.names == ["dataset_id", "dataset_gid", "iteration", "param_key", "number"]
+    assert (df.columns == ["name", "surname"]).all()
+    assert len(df) == 4

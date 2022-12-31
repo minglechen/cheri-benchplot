@@ -11,7 +11,7 @@ from .config import AnalysisConfig, Config, ExecTargetConfig
 from .elf import AddressSpaceManager, DWARFHelper
 from .instance import InstanceManager
 from .shellgen import ScriptBuilder
-from .task import ExecutionTask, Task, TaskRegistry, TaskScheduler
+from .task import (ExecutionTask, SessionExecutionTask, Task, TaskRegistry, TaskScheduler)
 from .util import new_logger, timing
 
 
@@ -54,12 +54,15 @@ class BenchmarkExecTask(Task):
         if task_klass is None:
             self.logger.error("Invalid task name specification exec.%s", task_name)
             raise ValueError("Invalid task name")
-        if not issubclass(task_klass, ExecutionTask):
-            self.logger.error("BenchmarkExecTask only supports depending on ExecutionTasks, found %s", task_klass)
-            raise TypeError("Invalid dependency type")
         if task_klass.require_instance:
             self._need_instance = True
-        return task_klass(self.benchmark, self.script, task_config=config.task_options)
+        if issubclass(task_klass, ExecutionTask):
+            return task_klass(self.benchmark, self.script, task_config=config.task_options)
+        elif issubclass(task_klass, SessionExecutionTask):
+            return task_klass(self.session, task_config=config.task_options)
+        else:
+            self.logger.error("Invalid task %s, must be ExecutionTask or SessionExecutionTask", task_klass)
+            raise TypeError("Invalid task type")
 
     def _handle_config_command_hooks_for_section(self, section_name: str, cmd_list: list[str | dict]):
         """
@@ -112,6 +115,10 @@ class BenchmarkExecTask(Task):
             for remote_path, host_path in zip(output.remote_paths, output.paths):
                 self.logger.debug("Extract %s guest: %s => host: %s", output_key, remote_path, host_path)
                 instance.extract_file(remote_path, host_path)
+
+    @property
+    def session(self):
+        return self.benchmark.session
 
     @property
     def task_id(self):
