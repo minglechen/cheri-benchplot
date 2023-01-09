@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from ..core.config import InstancePlatform, ProfileConfig
 from ..core.task import ExecutionTask, LocalFileTarget
+from pathlib import Path
 
 
 class QEMUTracingSetupTask(ExecutionTask):

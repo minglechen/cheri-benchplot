@@ -203,7 +203,7 @@ class InstrCountPlot(PlotTask):
             df = pd.concat([df_purecap, df_hybrid], axis=1, join="inner")
             df["ratio"] = df["purecap_count"] / df["hybrid_count"]
             df = df.sort_values(by=["ratio"], ascending=False)
-            print(df)
+            print(df.head(10).to_string(justify="right"))
             group_level = self.config["group_level"]
             plot_path = (
                 self.session.get_plot_root_path()
@@ -247,3 +247,6 @@ class StaticInstrCountPlot(PlotTask):
                     output_path=addr2line_path,
                 )
                 yield Addr2LineTask(self.session, config)
+
+    def run(self):
+        pass
