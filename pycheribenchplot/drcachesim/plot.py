@@ -150,6 +150,8 @@ class InstrCountPlotConfig(TemplateConfig):
 
 
 class InstrCountPlot(PlotTask):
+    """Creates csv files with the instruction count for comparison for each benchmark."""
+
     task_name = "instr-count-plot"
     task_config = InstrCountPlotConfig
     public = True
@@ -199,6 +201,7 @@ class InstrCountPlot(PlotTask):
                     df_hybrid = df.groupby(group)["count"].sum().rename("hybrid_count")
                 else:
                     raise Exception(f"Unknown variant {variant}")
+                print()
                 print(bench_name, variant)
             df = pd.concat([df_purecap, df_hybrid], axis=1, join="inner")
             df["ratio"] = df["purecap_count"] / df["hybrid_count"]
@@ -235,6 +238,8 @@ class StaticInstrCountPlot(PlotTask):
                 base = data_path / "drcachesim-results"
                 out_path = base / "instr_count"
                 addr2line_path = base / "addr2line.csv"
+                plot_path_base = self.session.get_plot_root_path() / variant
+                raw_path = plot_path_base / "objdump.txt"
                 if not out_path.exists():
                     out_path.mkdir(parents=True)
                 config = Addr2LineConfig(
@@ -245,8 +250,55 @@ class StaticInstrCountPlot(PlotTask):
                     / variant
                     / variant,
                     output_path=addr2line_path,
+                    raw_output_path=raw_path,
                 )
                 yield Addr2LineTask(self.session, config)
 
     def run(self):
-        pass
+        matrix: pd.DataFrame = self.session.benchmark_matrix
+        group = ["path", "line"]
+        if self.config["group_level"] == "line":
+            group = ["path", "line"]
+        elif self.config["group_level"] == "symbol":
+            group = ["path", "symbol"]
+        else:
+            self.logger.error(f"Unknown group level {self.config['group_level']}")
+
+        for bench_name in matrix.index.unique(
+            level=self.config["benchmark_param_name"]
+        ):
+            df_purecap = pd.DataFrame()
+            df_hybrid = pd.DataFrame()
+            for variant in matrix.index.unique(level=self.config["variant_param_name"]):
+                ind = (bench_name, variant)
+                # We only need one instance if there are multiple
+                benchmark = matrix.loc[ind][0]
+                data_path = benchmark.get_benchmark_data_path()
+                base = data_path / "drcachesim-results"
+                out_path = base / "addr2line.csv"
+                plot_path_base = self.session.get_plot_root_path() / bench_name
+                raw_path = plot_path_base / "objdump.txt"
+                assert out_path.is_file(), f"Missing {out_path}"
+                df = pd.read_csv(out_path)
+                if "purecap" in variant:
+                    df["path"] = df["path"].map(
+                        lambda x: str(x).split("riscv64-purecap-build")[-1]
+                    )
+                    df_purecap = df.groupby(group).size().rename("purecap_count")
+                elif "hybrid" in variant:
+                    df["path"] = df["path"].map(
+                        lambda x: str(x).split("riscv64-build")[-1]
+                    )
+                    df_hybrid = df.groupby(group).size().rename("hybrid_count")
+                else:
+                    raise Exception(f"Unknown variant {variant}")
+                print()
+                print("static", bench_name, variant)
+            df = pd.concat([df_purecap, df_hybrid], axis=1, join="inner")
+            df["ratio"] = df["purecap_count"] / df["hybrid_count"]
+            df = df.sort_values(by=["ratio"], ascending=False)
+            print(df.head(10).to_string(justify="right"))
+            group_level = self.config["group_level"]
+            plot_path = plot_path_base / f"static_instr_count_{group_level}_cmp.csv"
+            plot_path.parent.mkdir(parents=True, exist_ok=True)
+            df.to_csv(plot_path)

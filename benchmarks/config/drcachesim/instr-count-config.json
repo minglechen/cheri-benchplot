@@ -6,7 +6,7 @@
                 "drrun_path": "/local/scratch/mc2262/dynamorio/build/bin64/drrun",
                 "benchmark_param_name": "variant",
                 "variant_param_name": "spec_variant",
-                "group_level": "line"
+                "group_level": "symbol"
             }
         },
         {
@@ -14,7 +14,7 @@
             "task_options": {
                 "benchmark_param_name": "variant",
                 "variant_param_name": "spec_variant",
-                "group_level": "line"
+                "group_level": "symbol"
             }
         }
     ]

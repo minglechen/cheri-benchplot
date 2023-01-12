@@ -15,6 +15,7 @@ class Addr2LineConfig(TemplateConfig):
         "root/spec_static/spec-riscv64-purecap/471.omnetpp/471.omnetpp"
     )
     output_path: ConfigPath = field(default_factory=None)
+    raw_output_path: ConfigPath = field(default_factory=None)
 
 
 class Addr2LineTask(Task):
@@ -38,13 +39,16 @@ class Addr2LineTask(Task):
         return f"{self.task_namespace}-{self.task_name}- {self.uuid}"
 
     def run(self):
-        if self.config.output_path.is_file():
+        # skip if both files are present
+        if self.config.output_path.is_file() and self.config.raw_output_path.is_file():
             return
         with ObjdumpResolver(
             self.session.user_config.sdk_path, self.config.obj_path
         ) as resolver:
             df = resolver.load_to_df()
             df.to_csv(self.config.output_path, index=False)
+            if self.config.raw_output_path:
+                resolver.write_to_file(self.config.raw_output_path)
 
 
 class ObjdumpResolver:
@@ -60,6 +64,7 @@ class ObjdumpResolver:
             text=True,
             encoding="utf-8",
         )
+        self.text = self.objdump.stdout.readlines()
         return self
 
     def load_to_df(self) -> pd.DataFrame:
@@ -68,7 +73,7 @@ class ObjdumpResolver:
         line_num: int = None
         symbol: str = None
         addr_line_info = []
-        it = iter(self.objdump.stdout.readline, "")
+        it = iter(self.text)
         # skip first 2 lines
         next(it)
         next(it)
@@ -98,6 +103,10 @@ class ObjdumpResolver:
         return pd.DataFrame.from_records(
             addr_line_info, columns=["addr", "symbol", "path", "line"]
         )
+
+    def write_to_file(self, file_path: Path):
+        with file_path.open("w") as f:
+            f.writelines(self.text)
 
     def __exit__(self, type_, value, traceback):
         self.objdump.terminate()

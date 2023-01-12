@@ -35,7 +35,7 @@ class DrCacheSimAnalyseTask(AnalysisTask):
     task_config_class: typing.Type[Config] = DrCacheSimConfig
 
     def dependencies(self) -> typing.Iterable["Task"]:
-        for i, row in self.session.benchmark_matrix.iterrows():
+        for _, row in self.session.benchmark_matrix.iterrows():
             for benchmark in row:
                 data_path = benchmark.get_benchmark_data_path()
                 base = data_path / "drcachesim-results"
@@ -136,6 +136,9 @@ class InstrCountAnalyseTask(AnalysisTask):
                     / variant
                     / variant,
                     output_path=addr2line_path,
+                    raw_output_path=self.session.get_plot_root_path()
+                    / variant
+                    / f"{spec_variant}_objdump.txt",
                 )
                 yield Addr2LineTask(self.session, addr2line_config)
                 out_file = out_path / "instr_counts.csv"
