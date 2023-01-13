@@ -239,7 +239,7 @@ class StaticInstrCountPlot(PlotTask):
                 out_path = base / "instr_count"
                 addr2line_path = base / "addr2line.csv"
                 plot_path_base = self.session.get_plot_root_path() / variant
-                raw_path = plot_path_base / "objdump.txt"
+                raw_path = plot_path_base / f"{spec_variant}_objdump.txt"
                 if not out_path.exists():
                     out_path.mkdir(parents=True)
                 config = Addr2LineConfig(

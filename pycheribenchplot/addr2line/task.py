@@ -94,7 +94,7 @@ class ObjdumpResolver:
                 line_num = segs[1]
             else:
                 if line.endswith(":"):
-                    symbol = line.strip().split("<")[-1].strip(">:")
+                    symbol = line[line.index("<") + 1 : line.rindex(">")]
                 else:
                     segs = line.split(":")
                     addr = int(segs[0], 16)
@@ -105,6 +105,7 @@ class ObjdumpResolver:
         )
 
     def write_to_file(self, file_path: Path):
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with file_path.open("w") as f:
             f.writelines(self.text)
 
