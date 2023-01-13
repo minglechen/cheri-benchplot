@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from pycheribenchplot.core.config import TemplateConfig
+from pycheribenchplot.core.config import TemplateConfig, ConfigPath
 from pycheribenchplot.core.analysis import PlotTask
 from .analysis import (
     DrCacheSimAnalyseTask,
@@ -25,7 +25,7 @@ class CachePlotConfig(TemplateConfig):
 
 class CacheSizePlot(PlotTask):
     task_name = "cache-plot"
-    task_config = CachePlotConfig
+    task_config_class = CachePlotConfig
     public = True
 
     def convert_prefix(self, prefix):
@@ -142,7 +142,7 @@ class CacheSizePlot(PlotTask):
 
 @dataclass
 class InstrCountPlotConfig(TemplateConfig):
-    drrun_path: Path = field(default_factory=Path)
+    drrun_path: ConfigPath = field(default_factory=Path)
     benchmark_param_name: str = "variant"
     variant_param_name: str = "spec_variant"
     #: The group level (e.g. "line" or "symbol")
@@ -153,11 +153,11 @@ class InstrCountPlot(PlotTask):
     """Creates csv files with the instruction count for comparison for each benchmark."""
 
     task_name = "instr-count-plot"
-    task_config = InstrCountPlotConfig
+    task_config_class = InstrCountPlotConfig
     public = True
 
     def dependencies(self) -> typing.Iterable["Task"]:
-        config = InstrCountRunConfig(drrun_path=self.config["drrun_path"])
+        config = InstrCountRunConfig(drrun_path=self.config.drrun_path)
         yield InstrCountAnalyseTask(
             self.session, self.analysis_config, task_config=config
         )
@@ -165,19 +165,17 @@ class InstrCountPlot(PlotTask):
     def run(self):
         matrix: pd.DataFrame = self.session.benchmark_matrix
         group = ["path", "line"]
-        if self.config["group_level"] == "line":
+        if self.config.group_level == "line":
             group = ["path", "line"]
-        elif self.config["group_level"] == "symbol":
+        elif self.config.group_level == "symbol":
             group = ["path", "symbol"]
         else:
-            self.logger.error(f"Unknown group level {self.config['group_level']}")
+            self.logger.error(f"Unknown group level {self.config.group_level}")
 
-        for bench_name in matrix.index.unique(
-            level=self.config["benchmark_param_name"]
-        ):
+        for bench_name in matrix.index.unique(level=self.config.benchmark_param_name):
             df_purecap = pd.DataFrame()
             df_hybrid = pd.DataFrame()
-            for variant in matrix.index.unique(level=self.config["variant_param_name"]):
+            for variant in matrix.index.unique(level=self.config.variant_param_name):
                 ind = (bench_name, variant)
                 # We only need one instance if there are multiple
                 benchmark = matrix.loc[ind][0]
@@ -207,7 +205,7 @@ class InstrCountPlot(PlotTask):
             df["ratio"] = df["purecap_count"] / df["hybrid_count"]
             df = df.sort_values(by=["ratio"], ascending=False)
             print(df.head(10).to_string(justify="right"))
-            group_level = self.config["group_level"]
+            group_level = self.config.group_level
             plot_path = (
                 self.session.get_plot_root_path()
                 / bench_name
@@ -227,7 +225,7 @@ class StaticInstrCountPlotConfig(TemplateConfig):
 
 class StaticInstrCountPlot(PlotTask):
     task_name = "static-instr-count-plot"
-    task_config = StaticInstrCountPlotConfig
+    task_config_class = StaticInstrCountPlotConfig
     public = True
 
     def dependencies(self) -> typing.Iterable["Task"]:
@@ -257,19 +255,17 @@ class StaticInstrCountPlot(PlotTask):
     def run(self):
         matrix: pd.DataFrame = self.session.benchmark_matrix
         group = ["path", "line"]
-        if self.config["group_level"] == "line":
+        if self.config.group_level == "line":
             group = ["path", "line"]
-        elif self.config["group_level"] == "symbol":
+        elif self.config.group_level == "symbol":
             group = ["path", "symbol"]
         else:
-            self.logger.error(f"Unknown group level {self.config['group_level']}")
+            self.logger.error(f"Unknown group level {self.config.group_level}")
 
-        for bench_name in matrix.index.unique(
-            level=self.config["benchmark_param_name"]
-        ):
+        for bench_name in matrix.index.unique(level=self.config.benchmark_param_name):
             df_purecap = pd.DataFrame()
             df_hybrid = pd.DataFrame()
-            for variant in matrix.index.unique(level=self.config["variant_param_name"]):
+            for variant in matrix.index.unique(level=self.config.variant_param_name):
                 ind = (bench_name, variant)
                 # We only need one instance if there are multiple
                 benchmark = matrix.loc[ind][0]
@@ -277,7 +273,6 @@ class StaticInstrCountPlot(PlotTask):
                 base = data_path / "drcachesim-results"
                 out_path = base / "addr2line.csv"
                 plot_path_base = self.session.get_plot_root_path() / bench_name
-                raw_path = plot_path_base / "objdump.txt"
                 assert out_path.is_file(), f"Missing {out_path}"
                 df = pd.read_csv(out_path)
                 if "purecap" in variant:
@@ -298,7 +293,7 @@ class StaticInstrCountPlot(PlotTask):
             df["ratio"] = df["purecap_count"] / df["hybrid_count"]
             df = df.sort_values(by=["ratio"], ascending=False)
             print(df.head(10).to_string(justify="right"))
-            group_level = self.config["group_level"]
+            group_level = self.config.group_level
             plot_path = plot_path_base / f"static_instr_count_{group_level}_cmp.csv"
             plot_path.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(plot_path)
