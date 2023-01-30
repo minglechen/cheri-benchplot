@@ -114,7 +114,7 @@ class InstrCountAnalyseTask(AnalysisTask):
                 base = data_path / "drcachesim-results"
                 indir = data_path / "qemu-trace" / "qemu-trace-dir"
                 out_path = base / "instr_count"
-                addr2line_path = base / "addr2line.csv"
+                addr2line_dir = base / "addr2line"
                 if self.config.remove_saved_results:
                     shutil.rmtree(str(out_path), ignore_errors=True)
                 if not out_path.exists():
@@ -125,7 +125,7 @@ class InstrCountAnalyseTask(AnalysisTask):
                     drrun_path=self.config.drrun_path,
                     simulator="instr_count",
                     indir=indir,
-                    addr2line_file=addr2line_path,
+                    addr2line_file=addr2line_dir / "addr2line.csv",
                     output_dir=out_path,
                 )
                 addr2line_config = Addr2LineConfig(
@@ -135,7 +135,7 @@ class InstrCountAnalyseTask(AnalysisTask):
                     / spec_variant
                     / variant
                     / variant,
-                    output_path=addr2line_path,
+                    output_dir=addr2line_dir,
                     raw_output_path=self.session.get_plot_root_path()
                     / variant
                     / f"{spec_variant}_objdump.txt",

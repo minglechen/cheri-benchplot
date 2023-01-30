@@ -147,6 +147,9 @@ class InstrCountPlotConfig(TemplateConfig):
     variant_param_name: str = "spec_variant"
     #: The group level (e.g. "line" or "symbol")
     group_level: str = "line"
+    #: sort by ("ratio" or "diff")
+    sort_by: str = "ratio"
+    remove_drcachesim_results: bool = False
 
 
 class InstrCountPlot(PlotTask):
@@ -157,7 +160,10 @@ class InstrCountPlot(PlotTask):
     public = True
 
     def dependencies(self) -> typing.Iterable["Task"]:
-        config = InstrCountRunConfig(drrun_path=self.config.drrun_path)
+        config = InstrCountRunConfig(
+            drrun_path=self.config.drrun_path,
+            remove_saved_results=self.config.remove_drcachesim_results,
+        )
         yield InstrCountAnalyseTask(
             self.session, self.analysis_config, task_config=config
         )
@@ -168,7 +174,7 @@ class InstrCountPlot(PlotTask):
         if self.config.group_level == "line":
             group = ["path", "line"]
         elif self.config.group_level == "symbol":
-            group = ["path", "symbol"]
+            group = ["symbol"]
         else:
             self.logger.error(f"Unknown group level {self.config.group_level}")
 
@@ -184,32 +190,97 @@ class InstrCountPlot(PlotTask):
                 out_path = base / "instr_count" / "instr_counts.csv"
                 assert out_path.is_file(), f"Missing {out_path}"
 
+                if self.config.group_level == "symbol":
+                    symbol_path = base / "addr2line" / "symbol.csv"
+
                 df = pd.read_csv(out_path)
                 if "purecap" in variant:
                     df["path"] = df["path"].map(
                         lambda x: str(x).split("riscv64-purecap-build")[-1]
                     )
                     df_purecap = (
-                        df.groupby(group)["count"].sum().rename("purecap_count")
+                        (df.groupby(group)["count"].sum().rename("purecap_count"))
+                        .to_frame()
+                        .reset_index()
                     )
+                    if self.config.group_level == "symbol":
+                        df_symbol = pd.read_csv(symbol_path)
+                        purecap_calls = (
+                            pd.merge(
+                                df[["addr", "count"]],
+                                df_symbol,
+                                left_on="addr",
+                                right_on="addr",
+                                how="inner",
+                            )[["symbol", "count"]]
+                            .rename(columns={"count": "purecap_calls"})
+                            .groupby("symbol")
+                            .sum()
+                        )
+
+                        # print(purecap_calls)
+                        # df_symbol = df_symbol.set_index("symbol")
+                        # print(
+                        #     bench_name,
+                        #     df_symbol[
+                        #         df_symbol.index.duplicated(keep=False)
+                        #     ].sort_index(),
+                        # )
+                        df_purecap = pd.merge(
+                            df_purecap, purecap_calls, on="symbol"
+                        ).set_index(group)
+
                 elif "hybrid" in variant:
                     df["path"] = df["path"].map(
                         lambda x: str(x).split("riscv64-build")[-1]
                     )
-                    df_hybrid = df.groupby(group)["count"].sum().rename("hybrid_count")
+                    df_hybrid = (
+                        df.groupby(group)["count"]
+                        .sum()
+                        .rename("hybrid_count")
+                        .to_frame()
+                        .reset_index()
+                    )
+                    if self.config.group_level == "symbol":
+                        df_symbol = pd.read_csv(symbol_path)
+                        # print("hybrid")
+                        # print(df_symbol)
+                        # df_symbol = df_symbol.set_index("symbol")
+                        # print(
+                        #     bench_name,
+                        #     df_symbol[
+                        #         df_symbol.index.duplicated(keep=False)
+                        #     ].sort_index(),
+                        # )
+                        hybrid_calls = (
+                            pd.merge(
+                                df[["addr", "count"]],
+                                df_symbol,
+                                left_on="addr",
+                                right_on="addr",
+                                how="inner",
+                            )[["symbol", "count"]]
+                            .rename(columns={"count": "hybrid_calls"})
+                            .groupby("symbol")
+                            .sum()
+                        )
+                        df_hybrid = pd.merge(
+                            df_hybrid, hybrid_calls, on="symbol"
+                        ).set_index(group)
                 else:
                     raise Exception(f"Unknown variant {variant}")
-                print()
-                print(bench_name, variant)
+
             df = pd.concat([df_purecap, df_hybrid], axis=1, join="inner")
             df["ratio"] = df["purecap_count"] / df["hybrid_count"]
-            df = df.sort_values(by=["ratio"], ascending=False)
+            df["diff"] = df["purecap_count"] - df["hybrid_count"]
+            df = df.sort_values(by=[self.config.sort_by], ascending=False)
+            print(bench_name)
             print(df.head(10).to_string(justify="right"))
             group_level = self.config.group_level
             plot_path = (
                 self.session.get_plot_root_path()
                 / bench_name
-                / f"instr_count_{group_level}_cmp.csv"
+                / f"instr_count_{group_level}_{self.config.sort_by}.csv"
             )
             plot_path.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(plot_path)
@@ -221,6 +292,8 @@ class StaticInstrCountPlotConfig(TemplateConfig):
     variant_param_name: str = "spec_variant"
     #: The group level (e.g. "line" or "symbol")
     group_level: str = "line"
+    #: sort by ("ratio" or "diff")
+    sort_by: str = "ratio"
 
 
 class StaticInstrCountPlot(PlotTask):
@@ -235,7 +308,7 @@ class StaticInstrCountPlot(PlotTask):
                 data_path = benchmark.get_benchmark_data_path()
                 base = data_path / "drcachesim-results"
                 out_path = base / "instr_count"
-                addr2line_path = base / "addr2line.csv"
+                addr2line_dir = base / "addr2line"
                 plot_path_base = self.session.get_plot_root_path() / variant
                 raw_path = plot_path_base / f"{spec_variant}_objdump.txt"
                 if not out_path.exists():
@@ -247,7 +320,7 @@ class StaticInstrCountPlot(PlotTask):
                     / spec_variant
                     / variant
                     / variant,
-                    output_path=addr2line_path,
+                    output_dir=addr2line_dir,
                     raw_output_path=raw_path,
                 )
                 yield Addr2LineTask(self.session, config)
@@ -287,13 +360,17 @@ class StaticInstrCountPlot(PlotTask):
                     df_hybrid = df.groupby(group).size().rename("hybrid_count")
                 else:
                     raise Exception(f"Unknown variant {variant}")
-                print()
-                print("static", bench_name, variant)
+                # print()
+                # print("static", bench_name, variant)
             df = pd.concat([df_purecap, df_hybrid], axis=1, join="inner")
             df["ratio"] = df["purecap_count"] / df["hybrid_count"]
-            df = df.sort_values(by=["ratio"], ascending=False)
-            print(df.head(10).to_string(justify="right"))
+            df["diff"] = df["purecap_count"] - df["hybrid_count"]
+            df = df.sort_values(by=[self.config.sort_by], ascending=False)
+            # print(df.head(10).to_string(justify="right"))
             group_level = self.config.group_level
-            plot_path = plot_path_base / f"static_instr_count_{group_level}_cmp.csv"
+            plot_path = (
+                plot_path_base
+                / f"static_instr_count_{group_level}_{self.config.sort_by}.csv"
+            )
             plot_path.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(plot_path)

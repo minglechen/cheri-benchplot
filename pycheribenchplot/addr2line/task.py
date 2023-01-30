@@ -14,7 +14,7 @@ class Addr2LineConfig(TemplateConfig):
     obj_path: ConfigPath = Path(
         "root/spec_static/spec-riscv64-purecap/471.omnetpp/471.omnetpp"
     )
-    output_path: ConfigPath = field(default_factory=None)
+    output_dir: ConfigPath = field(default_factory=None)
     raw_output_path: ConfigPath = field(default_factory=None)
 
 
@@ -39,14 +39,22 @@ class Addr2LineTask(Task):
         return f"{self.task_namespace}-{self.task_name}- {self.uuid}"
 
     def run(self):
+        addr2line_file = self.config.output_dir / "addr2line.csv"
+        symbol_file = self.config.output_dir / "symbol.csv"
         # skip if both files are present
-        if self.config.output_path.is_file() and self.config.raw_output_path.is_file():
+        if (
+            addr2line_file.is_file()
+            and symbol_file.is_file()
+            and self.config.raw_output_path.is_file()
+        ):
             return
+        self.config.output_dir.mkdir(parents=True, exist_ok=True)
         with ObjdumpResolver(
             self.session.user_config.sdk_path, self.config.obj_path
         ) as resolver:
-            df = resolver.load_to_df()
-            df.to_csv(self.config.output_path, index=False)
+            addr_df, symbol_df = resolver.load_to_df()
+            addr_df.to_csv(addr2line_file, index=False)
+            symbol_df.to_csv(symbol_file, index=False)
             if self.config.raw_output_path:
                 resolver.write_to_file(self.config.raw_output_path)
 
@@ -73,6 +81,7 @@ class ObjdumpResolver:
         line_num: int = None
         symbol: str = None
         addr_line_info = []
+        symbol_info = []
         it = iter(self.text)
         # skip first 2 lines
         next(it)
@@ -81,28 +90,43 @@ class ObjdumpResolver:
             line = line.strip()
             if line.startswith("Disassembly of section") or line == "...":
                 continue
+            # new block
             if line == "":
-                path = ""
+                # keep the last path and symbol in case of basic block
+                # path = ""
                 line_num = 0
-                symbol = ""
+                # symbol = ""
                 continue
             if line.startswith(";"):
+                # alternative symbol name line (not used)
                 if line.endswith(":"):
                     continue
+                # new path and line number
                 segs = line.strip("; ").split(":")
                 path = segs[0]
                 line_num = segs[1]
             else:
                 if line.endswith(":"):
-                    symbol = line[line.index("<") + 1 : line.rindex(">")]
+                    # new symbol
+                    new_symbol = line[line.index("<") + 1 : line.rindex(">")]
+                    # clear path and symbol if not basic block
+                    if not new_symbol.startswith(".LBB"):
+                        # new start of a function
+                        symbol = new_symbol
+                        path = ""
+                        addr = int(line.split()[0], 16)
+                        symbol_info.append([addr, symbol])
+                    # else:
+                    #     print(f"basic block: {new_symbol}")
                 else:
+                    # new address
                     segs = line.split(":")
                     addr = int(segs[0], 16)
                     # print(f"addr: {addr}, symbol: {symbol}, path: {path}, line: {line_num}")
                     addr_line_info.append([addr, symbol, path, line_num])
         return pd.DataFrame.from_records(
             addr_line_info, columns=["addr", "symbol", "path", "line"]
-        )
+        ), pd.DataFrame.from_records(symbol_info, columns=["addr", "symbol"])
 
     def write_to_file(self, file_path: Path):
         file_path.parent.mkdir(parents=True, exist_ok=True)
