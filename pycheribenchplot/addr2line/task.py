@@ -48,6 +48,7 @@ class Addr2LineTask(Task):
             and self.config.raw_output_path.is_file()
         ):
             return
+        self.logger.info("Running addr2line on %s", self.config.obj_path)
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
         with ObjdumpResolver(
             self.session.user_config.sdk_path, self.config.obj_path
@@ -114,8 +115,11 @@ class ObjdumpResolver:
                         # new start of a function
                         symbol = new_symbol
                         path = ""
+                        # Add end address of previous function
+                        if symbol_info:
+                            symbol_info[-1].append(addr)
                         addr = int(line.split()[0], 16)
-                        symbol_info.append([addr, symbol])
+                        symbol_info.append([symbol, addr])
                     # else:
                     #     print(f"basic block: {new_symbol}")
                 else:
@@ -124,9 +128,13 @@ class ObjdumpResolver:
                     addr = int(segs[0], 16)
                     # print(f"addr: {addr}, symbol: {symbol}, path: {path}, line: {line_num}")
                     addr_line_info.append([addr, symbol, path, line_num])
+        # Add end address of last function
+        symbol_info[-1].append(addr)
         return pd.DataFrame.from_records(
             addr_line_info, columns=["addr", "symbol", "path", "line"]
-        ), pd.DataFrame.from_records(symbol_info, columns=["addr", "symbol"])
+        ), pd.DataFrame.from_records(
+            symbol_info, columns=["symbol", "addr", "end_addr"]
+        )
 
     def write_to_file(self, file_path: Path):
         file_path.parent.mkdir(parents=True, exist_ok=True)

@@ -3,38 +3,44 @@
     "concurrent_instances": 2,
     "reuse_instances": false,
     "instance_config": {
-        "instances": [{
-            "name": "hybrid",
-            "baseline": true,
-            "kernel": "CHERI-QEMU-NODEBUG",
-            "platform": "qemu",
-            "cheri_target": "riscv64-purecap",
-            "kernelabi": "hybrid"
-        }, {
-            "name": "purecap",
-            "baseline": false,
-            "kernel": "CHERI-PURECAP-QEMU-NODEBUG",
-            "platform": "qemu",
-            "cheri_target": "riscv64-purecap",
-            "kernelabi": "purecap"
-        }]
-    },
-    "benchmark_config": [{
-        "name": "spec-{variant}",
-        "desc": "SPEC2006 run for memory trace extraction",
-        "iterations": 1,
-        "parameterize": {
-            "variant": ["471.omnetpp"]
-        },
-        "benchmark": {
-            "handler": "spec",
-            "run_options": {
-                "spec_benchmark": "{variant}",
-                "spec_workload": "test"
+        "instances": [
+            {
+                "name": "purecap",
+                "baseline": true,
+                "kernel": "CHERI-QEMU-NODEBUG",
+                "platform": "qemu",
+                "cheri_target": "riscv64-purecap",
+                "kernelabi": "purecap"
             }
-        },
-        "aux_dataset_handlers": [
-            {"handler": "qemu-dynamorio"}
         ]
-    }]
+    },
+    "benchmark_config": [
+        {
+            "name": "{spec_variant}-{variant}",
+            "desc": "SPEC2006 run for memory trace extraction",
+            "iterations": 1,
+            "parameterize": {
+                "variant": [
+                    "471.omnetpp"
+                ],
+                "spec_variant": [
+                    "spec-strncpy-purecap",
+                    "spec-riscv64-hybrid"
+                ]
+            },
+            "command_hooks": {
+                "pre-benchmark": [
+                    "sysctl hw.qemu_trace_perthread=1"
+                ]
+            },
+            "benchmark": {
+                "handler": "spec",
+                "task_options": {
+                    "spec_path": "/root/spec_static/{spec_variant}",
+                    "spec_benchmark": "{variant}",
+                    "spec_workload": "test"
+                }
+            }
+        }
+    ]
 }

@@ -6,6 +6,7 @@ from uuid import uuid4
 from ..core.config import ConfigPath, ProfileConfig, TemplateConfig
 from ..core.task import Task
 from subprocess import run, PIPE, CompletedProcess
+from ..addr2line.task import Addr2LineTask
 
 
 @dataclass
@@ -32,9 +33,11 @@ class DrCacheSimRunConfig(TemplateConfig):
     output_dir: str = field(default_factory=str)
     #: Rerun drcachesim even if output file exists
     rerun_sim: bool = False
+    #: Optional addr2Line config
+    addr2line_config: TemplateConfig = None
 
 
-class DrCaheSimRunTask(Task):
+class DrCacheSimRunTask(Task):
     """Run a single drcachesim analysis"""
 
     public = True
@@ -42,16 +45,25 @@ class DrCaheSimRunTask(Task):
     task_namespace = "drcachesim-run"
     task_config_class = DrCacheSimRunConfig
 
-    def __init__(self, task_config=None):
+    def __init__(self, session, task_config=None):
         super().__init__(task_config)
         self.uuid = uuid4()
+        self._session = session
+
+    @property
+    def session(self):
+        return self._session
 
     @property
     def task_id(self):
         #: make sure that the task_id is unique
         return f"{self.task_namespace}.{self.task_name}-{self.uuid}"
 
-    def _run_drcachesim(self):
+    def dependencies(self) -> typing.Iterable["Task"]:
+        if self.config.addr2line_config:
+            yield Addr2LineTask(self.session, self.config.addr2line_config)
+
+    def run(self):
         cache_level = self.config.cache_level
         out_path = self.config.output_path
         size = self.config.cache_size
@@ -64,6 +76,16 @@ class DrCaheSimRunTask(Task):
         )
         if out_path and out_path.is_file() and not self.config.rerun_sim:
             self.logger.info(out_path, "already exists, skipping")
+            return
+
+        if (
+            simulator == "instr_count"
+            and (self.config.output_dir / "instr_counts.csv").is_file()
+            and not self.config.rerun_sim
+        ):
+            self.logger.info(
+                f"{self.config.output_dir / 'instr_counts.csv'} already exists, skipping"
+            )
             return
         cmd = [
             self.config.drrun_path,
@@ -93,6 +115,7 @@ class DrCaheSimRunTask(Task):
                     str(self.config.working_set_reset_interval),
                 ]
             )
+        self.logger.info(f"Running drcachesim on {self.config.indir}")
         p: CompletedProcess = run(
             cmd,
             stderr=PIPE,
@@ -102,7 +125,4 @@ class DrCaheSimRunTask(Task):
             with open(out_path, "w") as f:
                 f.write(result)
 
-    def run(self):
-        self.logger.info(f"Running drcachesim on {self.config.indir}")
-        self._run_drcachesim()
         self.logger.info(f"Finished running drcachesim on {self.config.indir}")

@@ -1,0 +1,14 @@
+{
+    "handlers": [
+        {
+            "handler": "analysis.plot.function-analysis-plot",
+            "task_options": {
+                "drrun_path": "/local/scratch/mc2262/dynamorio/build/bin64/drrun",
+                "benchmark_param_name": "variant",
+                "variant_param_name": "spec_variant",
+                "function_name": "strncpy",
+                "remove_drcachesim_results": false
+            }
+        }
+    ]
+}

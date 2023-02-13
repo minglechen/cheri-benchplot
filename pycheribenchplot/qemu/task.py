@@ -28,7 +28,8 @@ class QEMUTracingSetupTask(ExecutionTask):
     def get_qemu_interceptor_target(self) -> LocalFileTarget:
         """The QEMU interceptor trace output file path"""
         path = (
-            Path("qemu-trace-dir")
+            Path("qemu-trace")
+            / "qemu-trace-dir"
             / f"qemu-perfetto-interceptor-{self.benchmark.uuid}.trace.gz"
         )
         return LocalFileTarget.from_benchmark(self.benchmark, path)

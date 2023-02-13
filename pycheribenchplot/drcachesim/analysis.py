@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ..core.analysis import AnalysisTask, AnalysisConfig
 from ..core.config import ConfigPath, TemplateConfig, Config
-from .task import DrCaheSimRunTask, DrCacheSimRunConfig
+from .task import DrCacheSimRunTask, DrCacheSimRunConfig
 from ..addr2line.task import Addr2LineTask, Addr2LineConfig
 
 
@@ -58,7 +58,7 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                                 cache_size=s,
                                 output_path=out_path / f"{s}.txt",
                             )
-                            yield DrCaheSimRunTask(
+                            yield DrCacheSimRunTask(
                                 config,
                             )
                     elif level == "L1D":
@@ -73,7 +73,7 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                                 cache_size=s,
                                 output_path=out_path / f"{s}.txt",
                             )
-                            yield DrCaheSimRunTask(
+                            yield DrCacheSimRunTask(
                                 config,
                             )
                     elif level == "L1I":
@@ -88,7 +88,7 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                                 cache_size=s,
                                 output_path=out_path / f"{s}.txt",
                             )
-                            yield DrCaheSimRunTask(
+                            yield DrCacheSimRunTask(
                                 config,
                             )
                     else:
@@ -113,21 +113,14 @@ class InstrCountAnalyseTask(AnalysisTask):
                 variant, spec_variant = multi_ind
                 base = data_path / "drcachesim-results"
                 indir = data_path / "qemu-trace" / "qemu-trace-dir"
-                out_path = base / "instr_count"
+                out_dir = base / "instr_count"
                 addr2line_dir = base / "addr2line"
                 if self.config.remove_saved_results:
-                    shutil.rmtree(str(out_path), ignore_errors=True)
-                if not out_path.exists():
-                    out_path.mkdir(parents=True)
+                    shutil.rmtree(str(out_dir), ignore_errors=True)
+                if not out_dir.exists():
+                    out_dir.mkdir(parents=True)
 
-                out_path.mkdir(exist_ok=True)
-                cachesim_config = DrCacheSimRunConfig(
-                    drrun_path=self.config.drrun_path,
-                    simulator="instr_count",
-                    indir=indir,
-                    addr2line_file=addr2line_dir / "addr2line.csv",
-                    output_dir=out_path,
-                )
+                out_dir.mkdir(exist_ok=True)
                 addr2line_config = Addr2LineConfig(
                     obj_path=self.session.user_config.cheribsd_extra_files_path
                     / "root"
@@ -140,12 +133,18 @@ class InstrCountAnalyseTask(AnalysisTask):
                     / variant
                     / f"{spec_variant}_objdump.txt",
                 )
-                yield Addr2LineTask(self.session, addr2line_config)
-                out_file = out_path / "instr_counts.csv"
-                if not out_file.is_file():
-                    yield DrCaheSimRunTask(
-                        cachesim_config,
-                    )
+                cachesim_config = DrCacheSimRunConfig(
+                    drrun_path=self.config.drrun_path,
+                    simulator="instr_count",
+                    indir=indir,
+                    addr2line_file=addr2line_dir / "addr2line.csv",
+                    output_dir=out_dir,
+                    addr2line_config=addr2line_config,
+                )
+                yield DrCacheSimRunTask(
+                    session=self.session,
+                    task_config=cachesim_config,
+                )
 
     def run(self):
         self.logger.info(f"Finished instrcount analysis")

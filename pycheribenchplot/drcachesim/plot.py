@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
 
@@ -217,15 +218,6 @@ class InstrCountPlot(PlotTask):
                             .groupby("symbol")
                             .sum()
                         )
-
-                        # print(purecap_calls)
-                        # df_symbol = df_symbol.set_index("symbol")
-                        # print(
-                        #     bench_name,
-                        #     df_symbol[
-                        #         df_symbol.index.duplicated(keep=False)
-                        #     ].sort_index(),
-                        # )
                         df_purecap = pd.merge(
                             df_purecap, purecap_calls, on="symbol"
                         ).set_index(group)
@@ -243,15 +235,6 @@ class InstrCountPlot(PlotTask):
                     )
                     if self.config.group_level == "symbol":
                         df_symbol = pd.read_csv(symbol_path)
-                        # print("hybrid")
-                        # print(df_symbol)
-                        # df_symbol = df_symbol.set_index("symbol")
-                        # print(
-                        #     bench_name,
-                        #     df_symbol[
-                        #         df_symbol.index.duplicated(keep=False)
-                        #     ].sort_index(),
-                        # )
                         hybrid_calls = (
                             pd.merge(
                                 df[["addr", "count"]],
@@ -331,7 +314,7 @@ class StaticInstrCountPlot(PlotTask):
         if self.config.group_level == "line":
             group = ["path", "line"]
         elif self.config.group_level == "symbol":
-            group = ["path", "symbol"]
+            group = ["symbol"]
         else:
             self.logger.error(f"Unknown group level {self.config.group_level}")
 
@@ -344,7 +327,7 @@ class StaticInstrCountPlot(PlotTask):
                 benchmark = matrix.loc[ind][0]
                 data_path = benchmark.get_benchmark_data_path()
                 base = data_path / "drcachesim-results"
-                out_path = base / "addr2line.csv"
+                out_path = base / "addr2line" / "addr2line.csv"
                 plot_path_base = self.session.get_plot_root_path() / bench_name
                 assert out_path.is_file(), f"Missing {out_path}"
                 df = pd.read_csv(out_path)
@@ -374,3 +357,100 @@ class StaticInstrCountPlot(PlotTask):
             )
             plot_path.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(plot_path)
+
+
+@dataclass
+class FunctionAnalysisPlotConfig(TemplateConfig):
+    drrun_path: ConfigPath = field(default_factory=Path)
+    benchmark_param_name: str = "variant"
+    variant_param_name: str = "spec_variant"
+    function_name: str = "main"
+    remove_drcachesim_results: bool = False
+
+
+class FunctionAnalysisPlot(PlotTask):
+
+    task_name = "function-analysis-plot"
+    task_config_class = FunctionAnalysisPlotConfig
+    public = True
+
+    def dependencies(self) -> typing.Iterable["Task"]:
+        config = InstrCountRunConfig(
+            drrun_path=self.config.drrun_path,
+            remove_saved_results=self.config.remove_drcachesim_results,
+        )
+        yield InstrCountAnalyseTask(
+            self.session, self.analysis_config, task_config=config
+        )
+
+    def run(self):
+        matrix: pd.DataFrame = self.session.benchmark_matrix
+
+        for bench_name in matrix.index.unique(level=self.config.benchmark_param_name):
+            df_purecap = pd.DataFrame()
+            df_hybrid = pd.DataFrame()
+            for variant in matrix.index.unique(level=self.config.variant_param_name):
+                ind = (bench_name, variant)
+                # We only need one instance if there are multiple
+                benchmark = matrix.loc[ind][0]
+                data_path = benchmark.get_benchmark_data_path()
+                base = data_path / "drcachesim-results"
+                out_path = base / "instr_count" / "instr_counts.csv"
+                assert out_path.is_file(), f"Missing {out_path}"
+
+                symbol_path = base / "addr2line" / "symbol.csv"
+
+                df_symbol = pd.read_csv(symbol_path)
+                df = pd.read_csv(out_path)
+                if "purecap" in variant:
+                    symbol_range = df_symbol[
+                        df_symbol["symbol"] == self.config.function_name
+                    ].reset_index(drop=True)
+                    start = symbol_range["addr"].iloc[0]
+                    end = symbol_range["end_addr"].iloc[0]
+                    purecap_df = (
+                        df[(df["addr"] >= start) & (df["addr"] <= end)]
+                        .sort_values(by=["addr"])
+                        .reset_index(drop=True)
+                    )
+                    # print("purecap")
+                    # print(purecap_df)
+
+                elif "hybrid" in variant:
+                    symbol_range = df_symbol[
+                        df_symbol["symbol"] == self.config.function_name
+                    ].reset_index(drop=True)
+                    start = symbol_range["addr"].iloc[0]
+                    end = symbol_range["end_addr"].iloc[0]
+                    hybrid_df = (
+                        df[(df["addr"] >= start) & (df["addr"] <= end)]
+                        .sort_values(by=["addr"])
+                        .reset_index(drop=True)
+                    )
+                    # print("hybrid")
+                    # print(hybrid_df)
+                else:
+                    raise Exception(f"Unknown variant {variant}")
+
+            plot_path = (
+                self.session.get_plot_root_path()
+                / bench_name
+                / f"function_analysis_{self.config.function_name}.pdf"
+            )
+
+            plot_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.locator_params(axis="x", nbins=10)
+            fig, (ax1, ax2) = plt.subplots(2)
+            fig.suptitle(
+                f"Function Analysis of {self.config.function_name}, {bench_name}"
+            )
+            ax1.plot(purecap_df["addr"].index, purecap_df["count"])
+            ax2.plot(hybrid_df["addr"].index, hybrid_df["count"])
+            # ax1.set_xticklabels(ax1.get_xticklabels(), rotation=45, ha="right")
+            # ax2.set_xticklabels(ax2.get_xticklabels(), rotation=45, ha="right")
+            # ax1.xaxis.set_major_locator(plt.maxNLocator(5))
+            # ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%x"))
+            # ax2.xaxis.set_major_locator(ticker.MultipleLocator(1))
+            # ax2.xaxis.set_major_formatter(ticker.FormatStrFormatter("%x"))
+            fig.savefig(plot_path)
+            plt.close(fig)
