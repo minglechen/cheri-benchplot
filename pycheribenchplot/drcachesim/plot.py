@@ -444,13 +444,22 @@ class FunctionAnalysisPlot(PlotTask):
             fig.suptitle(
                 f"Function Analysis of {self.config.function_name}, {bench_name}"
             )
+
+            ax1.set_title("Purecap")
+            ax2.set_title("Hybrid")
+            ax1.set_ylabel("Instruction Hits")
+            ax2.set_ylabel("Instruction Hits")
+            ax1.set_xlabel("Instruction index")
+            ax2.set_xlabel("Instruction index")
+
             ax1.plot(purecap_df["addr"].index, purecap_df["count"])
             ax2.plot(hybrid_df["addr"].index, hybrid_df["count"])
+            fig.tight_layout()
             # ax1.set_xticklabels(ax1.get_xticklabels(), rotation=45, ha="right")
             # ax2.set_xticklabels(ax2.get_xticklabels(), rotation=45, ha="right")
             # ax1.xaxis.set_major_locator(plt.maxNLocator(5))
             # ax1.xaxis.set_major_formatter(ticker.FormatStrFormatter("%x"))
             # ax2.xaxis.set_major_locator(ticker.MultipleLocator(1))
             # ax2.xaxis.set_major_formatter(ticker.FormatStrFormatter("%x"))
-            fig.savefig(plot_path)
+            fig.savefig(plot_path, bbox_inches="tight")
             plt.close(fig)
