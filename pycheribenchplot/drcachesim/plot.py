@@ -221,6 +221,8 @@ class InstrCountPlot(PlotTask):
                         df_purecap = pd.merge(
                             df_purecap, purecap_calls, on="symbol"
                         ).set_index(group)
+                    elif self.config.group_level == "line":
+                        df_purecap = df_purecap.set_index(group)
 
                 elif "hybrid" in variant:
                     df["path"] = df["path"].map(
@@ -250,6 +252,8 @@ class InstrCountPlot(PlotTask):
                         df_hybrid = pd.merge(
                             df_hybrid, hybrid_calls, on="symbol"
                         ).set_index(group)
+                    elif self.config.group_level == "line":
+                        df_hybrid = df_hybrid.set_index(group)
                 else:
                     raise Exception(f"Unknown variant {variant}")
 
@@ -266,7 +270,9 @@ class InstrCountPlot(PlotTask):
                 / f"instr_count_{group_level}_{self.config.sort_by}.csv"
             )
             plot_path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(plot_path)
+            # df.to_csv(plot_path)
+            with plot_path.open("w") as f:
+                f.write(df.to_csv())
 
 
 @dataclass
@@ -356,7 +362,9 @@ class StaticInstrCountPlot(PlotTask):
                 / f"static_instr_count_{group_level}_{self.config.sort_by}.csv"
             )
             plot_path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(plot_path)
+            # df.to_csv(plot_path)
+            with plot_path.open("w") as f:
+                f.write(df.to_csv())
 
 
 @dataclass

@@ -335,7 +335,12 @@ class ExecutionTask(BenchmarkTask):
     #: Whether the task requires a running VM instance or not. Instead of changing this use :class:`DataGenTask`.
     require_instance = True
 
-    def __init__(self, benchmark: "Benchmark", script: "ScriptBuilder", task_config: Config = None):
+    def __init__(
+        self,
+        benchmark: "Benchmark",
+        script: "ScriptBuilder",
+        task_config: Config = None,
+    ):
         super().__init__(benchmark, task_config=task_config)
         #: Script builder associated to the current benchmark context.
         self.script = script
@@ -396,7 +401,12 @@ class AnalysisTask(SessionTask):
 
     task_namespace = "analysis"
 
-    def __init__(self, session: "Session", analysis_config: AnalysisConfig, task_config: Config = None):
+    def __init__(
+        self,
+        session: "Session",
+        analysis_config: AnalysisConfig,
+        task_config: Config = None,
+    ):
         super().__init__(session, task_config=task_config)
         #: Analysis configuration for this invocation
         self.analysis_config = analysis_config

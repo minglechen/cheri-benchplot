@@ -39,8 +39,8 @@ class Addr2LineTask(Task):
         return f"{self.task_namespace}-{self.task_name}- {self.uuid}"
 
     def run(self):
-        addr2line_file = self.config.output_dir / "addr2line.csv"
-        symbol_file = self.config.output_dir / "symbol.csv"
+        addr2line_file:Path = self.config.output_dir / "addr2line.csv"
+        symbol_file:Path = self.config.output_dir / "symbol.csv"
         # skip if both files are present
         if (
             addr2line_file.is_file()
@@ -54,8 +54,12 @@ class Addr2LineTask(Task):
             self.session.user_config.sdk_path, self.config.obj_path
         ) as resolver:
             addr_df, symbol_df = resolver.load_to_df()
-            addr_df.to_csv(addr2line_file, index=False)
-            symbol_df.to_csv(symbol_file, index=False)
+            with addr2line_file.open("w") as f:
+                f.write(addr_df.to_csv(index=False))
+            with symbol_file.open("w") as f:
+                f.write(symbol_df.to_csv(index=False))
+            # addr_df.to_csv(path_or_buf=addr2line_file, index=False)
+            # symbol_df.to_csv(path_or_buf=symbol_file, index=False)
             if self.config.raw_output_path:
                 resolver.write_to_file(self.config.raw_output_path)
 
@@ -76,7 +80,7 @@ class ObjdumpResolver:
         self.text = self.objdump.stdout.readlines()
         return self
 
-    def load_to_df(self) -> pd.DataFrame:
+    def load_to_df(self):
         path: Path = None
         addr: int = None
         line_num: int = None
