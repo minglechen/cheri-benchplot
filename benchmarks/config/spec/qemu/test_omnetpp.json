@@ -1,6 +1,6 @@
 {
     "ssh_key": "extra_files/freebsd_test_id_rsa",
-    "concurrent_instances": 2,
+    "concurrent_instances": 1,
     "reuse_instances": false,
     "instance_config": {
         "instances": [
@@ -24,7 +24,7 @@
                     "471.omnetpp"
                 ],
                 "spec_variant": [
-                    "spec-strncpy-purecap",
+                    "spec-new-instrs-purecap",
                     "spec-riscv64-hybrid"
                 ]
             },

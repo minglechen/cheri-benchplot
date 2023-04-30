@@ -1,0 +1,11 @@
+{
+    "handlers": [
+        {
+            "handler": "analysis.plot.csetbounds-sizes-plot",
+            "task_options": {
+                "input_file": "/local/scratch/mc2262/csetbounds-stats.csv",
+                "output_file": "/local/scratch/mc2262/csetbounds-sizes.pdf"
+            }
+        }
+    ]
+}

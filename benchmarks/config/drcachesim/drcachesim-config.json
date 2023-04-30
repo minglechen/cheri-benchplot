@@ -33,9 +33,7 @@
                     "512K"
                 ],
                 "run_cache_levels": [
-                    "L1I",
-                    "L1D",
-                    "LL"
+                    "L1D"
                 ],
                 "drrun_path": "/local/scratch/mc2262/dynamorio/build/bin64/drrun",
                 "remove_saved_results": false

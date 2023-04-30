@@ -1,0 +1,12 @@
+{
+    "handlers": [
+        {
+            "handler": "analysis.plot.cache-plot",
+            "task_options": {
+                "plot_cache_levels": [
+                    "L1D"
+                ]
+            }
+        }
+    ]
+}

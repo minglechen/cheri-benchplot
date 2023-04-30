@@ -125,4 +125,4 @@ class DrCacheSimRunTask(Task):
             with open(out_path, "w") as f:
                 f.write(result)
 
-        self.logger.info(f"Finished running drcachesim on {self.config.indir}")
+        self.logger.debug(f"Finished running drcachesim on {self.config.indir}")

@@ -8,7 +8,8 @@
                 "variant_param_name": "spec_variant",
                 "group_level": "symbol",
                 "sort_by": "diff",
-                "remove_drcachesim_results": false
+                "remove_drcachesim_results": false,
+                "plot_overhead": true
             }
         },
         {

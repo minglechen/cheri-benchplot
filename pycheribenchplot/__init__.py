@@ -24,6 +24,7 @@ import pycheribenchplot.drcachesim.task
 import pycheribenchplot.drcachesim.plot
 import pycheribenchplot.addr2line.task
 import pycheribenchplot.spec.task
+import pycheribenchplot.csetbounds_stats.plot
 
 # import pycheribenchplot.netstat.dataset
 # import pycheribenchplot.pmc.analysis

@@ -59,7 +59,8 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                                 output_path=out_path / f"{s}.txt",
                             )
                             yield DrCacheSimRunTask(
-                                config,
+                                session=self.session,
+                                task_config=config,
                             )
                     elif level == "L1D":
                         sizes = self.config.L1D_cache_sizes
@@ -74,7 +75,8 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                                 output_path=out_path / f"{s}.txt",
                             )
                             yield DrCacheSimRunTask(
-                                config,
+                                session=self.session,
+                                task_config=config,
                             )
                     elif level == "L1I":
                         sizes = self.config.L1I_cache_sizes
@@ -89,7 +91,8 @@ class DrCacheSimAnalyseTask(AnalysisTask):
                                 output_path=out_path / f"{s}.txt",
                             )
                             yield DrCacheSimRunTask(
-                                config,
+                                session=self.session,
+                                task_config=config,
                             )
                     else:
                         self.logger.error(f"Unknown cache level {level}")
