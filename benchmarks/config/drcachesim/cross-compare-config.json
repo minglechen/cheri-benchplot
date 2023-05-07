@@ -1,0 +1,22 @@
+
+{
+    "handlers": [
+        {
+            "handler": "analysis.plot.cross-compare-plot",
+            "task_options": {
+                "optimized_file": "/local/scratch/mc2262/spec_test_candaddr_trace/plots/471.omnetpp/instr_count_symbol_diff.csv",
+                "baseline_file": "/local/scratch/mc2262/spec_static_test_trace/plots/471.omnetpp/instr_count_symbol_diff.csv",
+                "output_file": "/local/scratch/mc2262/spec_test_candaddr_trace/plots/471.omnetpp/symbol_diff_cross_compare.csv",
+                "output_plot": "/local/scratch/mc2262/spec_test_candaddr_trace/plots/471.omnetpp/symbol_diff_cross_compare.pdf",
+
+                "additional_labels": ["hybrid_count"],
+                "additional_label_names": ["hybrid_baseline"],
+                "plot_symbols": [
+                    "malloc",
+                    "free",
+                    "strncpy"
+                ]
+            }
+        }
+    ]
+}

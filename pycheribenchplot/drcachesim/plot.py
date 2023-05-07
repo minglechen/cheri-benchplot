@@ -172,7 +172,7 @@ class InstrCountPlot(PlotTask):
 
     def __init__(self, session: "Session", analysis_config, task_config = None):
         super().__init__(session, analysis_config, task_config=task_config)
-        self.output_data = None
+        self.output_data = {}
 
     def dependencies(self) -> typing.Iterable["Task"]:
         config = InstrCountRunConfig(
@@ -183,7 +183,7 @@ class InstrCountPlot(PlotTask):
             self.session, self.analysis_config, task_config=config
         )
     
-    def analysis_output(self) -> pd.DataFrame:
+    def analysis_output(self) -> typing.Dict[str, pd.DataFrame]:
         return self.output_data
     
     def plot_overhead(self, df: pd.DataFrame, dir: Path, bench_name:str, report_top = 5, max_width = 20):
@@ -322,7 +322,7 @@ class InstrCountPlot(PlotTask):
             df["ratio"] = df["purecap_count"] / df["hybrid_count"]
             df["diff"] = df["purecap_count"] - df["hybrid_count"]
             df = df.sort_values(by=[self.config.sort_by], ascending=False)
-            self.output_data = df
+            self.output_data[bench_name] = df
             print(bench_name)
             print(df.head(10).to_string(justify="right"))
             group_level = self.config.group_level
@@ -538,9 +538,14 @@ class FunctionAnalysisPlot(PlotTask):
 
 @dataclass
 class CrossComparePlotConfig(TemplateConfig):
-    data_file1: ConfigPath = field(default_factory=Path)
-    data_file2: ConfigPath = field(default_factory=Path)
+    optimized_file: ConfigPath = field(default_factory=Path)
+    baseline_file: ConfigPath = field(default_factory=Path)
     output_file: ConfigPath = field(default_factory=Path)
+    output_plot: ConfigPath = field(default_factory=Path)
+    bench_name: str = "471.omnetpp"
+    plot_symbols: list[str] = field(default_factory=list)
+    additional_labels: list[str] = field(default_factory=list)
+    additional_label_names: list[str] = field(default_factory=list)
     instr_count_config: InstrCountPlotConfig = None
 
 class CrossComparePlot(PlotTask):
@@ -559,26 +564,40 @@ class CrossComparePlot(PlotTask):
 
     def run(self):
         # Read in the data
-        df1 = pd.read_csv(self.config.data_file1)
+        df1 = pd.read_csv(self.config.baseline_file)
         if self.plot_task:
-            df2 = self.plot_task.analysis_output()
+            df2 = self.plot_task.analysis_output()[self.config.bench_name]
         else:
-            df2 = pd.read_csv(self.config.instr_count_config.data_file2)
+            df2 = pd.read_csv(self.config.optimized_file)
 
-        df1 = df1[["symbol", "purecap_count"]]
-        df2 = df2[["symbol", "purecap_count"]]
+        df_base = df1[["symbol", "purecap_count"]].rename(columns={"purecap_count": "purecap_baseline"})
+        df_opt = df2[["symbol", "purecap_count"]].rename(columns={"purecap_count": "purecap_optimization"})
 
         # Merge the data
-        df = pd.merge(df1, df2, on="symbol", how="outer")
+        df = pd.merge(df_base, df_opt, on="symbol", how="outer")
+        
+        if(self.config.additional_labels):
+            df = pd.merge(df, df1[["symbol"]+self.config.additional_labels], on="symbol", how="outer")
 
-        # Rename the columns
-        df.columns = ["symbol", "purecap_count_1", "purecap_count_2"]
-
+        df = df.rename(columns={orig: new for orig, new in zip(self.config.additional_labels, self.config.additional_label_names)})
         # Compute the difference
-        df["purecap_count_diff"] = df["purecap_count_1"] - df["purecap_count_2"]
+        df["purecap_count_diff"] = df["purecap_baseline"] - df["purecap_optimization"]
 
         # Sort the data
         df = df.sort_values("purecap_count_diff", ascending=False)
+        print(df)
 
         # Save the data
         df.to_csv(self.config.output_file, index=False)
+        df.set_index("symbol", inplace=True)
+
+        df = df.loc[self.config.plot_symbols]
+        df /= 1000000
+        # plot the data
+        fig, ax = plt.subplots()
+        fig.suptitle(f"Instruction Count of {self.config.bench_name}")
+        ax.set_ylabel("Instruction Count (Million)")
+        ax.set_xlabel("Symbol")
+        df.plot.bar(y=["purecap_baseline", "purecap_optimization"] + self.config.additional_label_names, ax=ax, use_index=True)
+        fig.savefig(self.config.output_plot, bbox_inches="tight")
+        plt.close(fig)
