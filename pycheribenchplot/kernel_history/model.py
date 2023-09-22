@@ -1,19 +1,17 @@
 import pandas as pd
-from pandera import Field, check, dataframe_check
+from pandera import Field, SchemaModel, check, dataframe_check
 from pandera.typing import Index, Series
 
-from pycheribenchplot.core.model import BaseDataModel
+from pycheribenchplot.core.model import DataModel, GlobalModel
 from pycheribenchplot.core.util import new_logger
 
 
-class CheriBSDChangesModel(BaseDataModel):
+class CheriBSDAnnotationsModel(GlobalModel):
     """
-    CheriBSD changes are not identified by a benchmark UUID, instead they exist as a
-    session-global dataset.
-    We omit dataset_id/gid and iteration indexes.
+    Shape of the dataframe containing CheriBSD annotation information
     """
     filename: Index[str] = Field(alias="file", check_name=True)
-    target_type: Series[str] = Field(isin=["header", "kernel", "lib", "prog"])
+    target_type: Series[str] = Field(isin=["header", "kernel", "lib", "prog", "test"])
     updated: Series[str]
     changes: Series[object]
     changes_purecap: Series[object]
@@ -40,7 +38,3 @@ class CheriBSDChangesModel(BaseDataModel):
         for fname in offending_files:
             logger.error("%s has CHERI changes annotation but have no changes category", fname)
         return ~nulls
-
-    @classmethod
-    def dynamic_index_position(cls):
-        return None

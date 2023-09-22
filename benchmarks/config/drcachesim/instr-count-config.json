@@ -1,6 +1,20 @@
 {
-    "handlers": [
-        {
+    "instance_config": {
+        "instances": [
+            {
+                "name": "purecap",
+                "baseline": true,
+                "kernel": "CHERI-QEMU-NODEBUG",
+                "platform": "qemu",
+                "cheri_target": "riscv64-purecap",
+                "kernelabi": "purecap"
+            }
+        ]
+    },
+    "benchmark_config": [{
+        "name": "instr-count-plot",
+        "desc": "Plot instruction count for each benchmark",
+        "generators": [{
             "handler": "analysis.plot.instr-count-plot",
             "task_options": {
                 "drrun_path": "/local/scratch/mc2262/dynamorio/build/bin64/drrun",
@@ -21,5 +35,6 @@
                 "group_level": "symbol"
             }
         }
-    ]
+        ]
+    }]
 }

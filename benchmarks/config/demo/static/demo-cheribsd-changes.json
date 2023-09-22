@@ -1,28 +1,28 @@
 {
     "instance_config": {
         "instances": [{
-            "name": "hybrid",
+            "kernel": "CHERI-PURECAP-QEMU",
             "baseline": true,
-            "kernel": "CHERI-QEMU-NODEBUG",
-            "platform": "qemu",
             "cheri_target": "riscv64-purecap",
-            "kernelabi": "hybrid"
+            "kernelabi": "purecap"
         }, {
-            "name": "purecap",
+            "kernel": "GENERIC-MORELLO-PURECAP",
             "baseline": false,
-            "kernel": "CHERI-PURECAP-QEMU-NODEBUG",
-            "platform": "qemu",
-            "cheri_target": "riscv64-purecap",
+            "cheri_target": "morello-purecap",
             "kernelabi": "purecap"
         }]
     },
     "benchmark_config": [{
-        "name": "demo-cheribsd-history",
-        "desc": "cheri changes demo",
+        "name": "cheribsd-history",
+        "desc": "CheriBSD source code changes",
         "iterations": 1,
-        "benchmark": {
-            "handler": "kernel-history.cheribsd-changes",
-            "task_options": {}
-        }
+        "generators": [{
+            "handler": "kernel-history.cheribsd-changes"
+        }, {
+            "handler": "kernel-history.cheribuild-cdb-trace",
+            "task_options": {
+                "ephemeral_build_root": false
+            }
+        }]
     }]
 }

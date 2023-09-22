@@ -3,14 +3,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
-from ..core.config import ConfigPath, ProfileConfig, TemplateConfig
+from ..core.config import ConfigPath, Config
 from ..core.task import Task
 from subprocess import run, PIPE, CompletedProcess
 from ..addr2line.task import Addr2LineTask
 
 
 @dataclass
-class DrCacheSimRunConfig(TemplateConfig):
+class DrCacheSimRunConfig(Config):
     #: Path to the drcachesim executable
     drrun_path: ConfigPath = Path("bin64/drrun")
     #: Simulator to run
@@ -34,7 +34,7 @@ class DrCacheSimRunConfig(TemplateConfig):
     #: Rerun drcachesim even if output file exists
     rerun_sim: bool = False
     #: Optional addr2Line config
-    addr2line_config: TemplateConfig = None
+    addr2line_config: Config = None
 
 
 class DrCacheSimRunTask(Task):

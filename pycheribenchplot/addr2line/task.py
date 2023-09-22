@@ -3,14 +3,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import pandas as pd
 
-from ..core.config import ConfigPath, ProfileConfig, TemplateConfig
-from ..core.task import Task, AnalysisTask
+from ..core.config import ConfigPath, Config
+from ..core.task import Task
 from subprocess import Popen, PIPE, CompletedProcess
 from uuid import uuid4
 
 
 @dataclass
-class Addr2LineConfig(TemplateConfig):
+class Addr2LineConfig(Config):
     obj_path: ConfigPath = Path(
         "root/spec_static/spec-riscv64-purecap/471.omnetpp/471.omnetpp"
     )

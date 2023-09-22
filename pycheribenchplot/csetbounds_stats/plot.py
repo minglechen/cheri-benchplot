@@ -1,12 +1,12 @@
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass, field
-from pycheribenchplot.core.analysis import PlotTask
-from pycheribenchplot.core.config import TemplateConfig, ConfigPath
+from pycheribenchplot.core.plot import PlotTask
+from pycheribenchplot.core.config import Config, ConfigPath
 from matplotlib import pyplot as plt
 
 @dataclass
-class CSetBoundsSizesPlotConfig(TemplateConfig):
+class CSetBoundsSizesPlotConfig(Config):
     input_file: ConfigPath = field(default_factory=Path)
     output_file: ConfigPath = field(default_factory=Path)
 

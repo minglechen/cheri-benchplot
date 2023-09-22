@@ -38,13 +38,13 @@ def netperf_config():
 
 
 @pytest.fixture
-def netperf_session(fake_session_factory, netperf_config):
+def netperf_session(snap_task_registry, fake_session_factory, netperf_config):
     session = fake_session_factory(netperf_config)
     return session
 
 
 @pytest.fixture
-def netperf_args_session(fake_session_factory, netperf_config):
+def netperf_args_session(snap_task_registry, fake_session_factory, netperf_config):
     bench = netperf_config["configurations"][0]["benchmark"]
     # Add netperf options
     bench["task_options"] = {"netperf_options": ["--foo", "--bar"], "netserver_options": ["-x", "-y"]}
@@ -53,7 +53,7 @@ def netperf_args_session(fake_session_factory, netperf_config):
 
 
 @pytest.fixture
-def netperf_qemu_session(fake_session_factory, netperf_config):
+def netperf_qemu_session(snap_task_registry, fake_session_factory, netperf_config):
     bench = netperf_config["configurations"][0]["benchmark"]
     # Add netperf options and qemu tracing
     bench["task_options"] = {"profile": {"qemu_trace": "perfetto", "qemu_trace_categories": ["instructions"]}}
@@ -110,10 +110,10 @@ def test_netperf_exec_task_default(netperf_session, mock_qemu_instance, mock_run
 
     # Verify the default run script
     expect_lines = [
-        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/riscv64-purecap/netperf/bin/netserver &", r"PID_5=\$!",
+        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/{instance.cheri_target}/netperf/bin/netserver &", r"PID_5=\$!",
         r"sysctl hw.qemu_trace_perthread=1",
-        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/riscv64-purecap/netperf/bin/netperf >> /root/benchmark-output/0/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
-        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/riscv64-purecap/netperf/bin/netperf >> /root/benchmark-output/1/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
+        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/{instance.cheri_target}/netperf/bin/netperf >> /root/benchmark-output/0/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
+        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/{instance.cheri_target}/netperf/bin/netperf >> /root/benchmark-output/1/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
         r"kill -TERM \$PID_5"
     ]
     check_lines_match(mock_run_script.getvalue().split("\n"), expect_lines)
@@ -146,10 +146,10 @@ def test_netperf_exec_task_args(netperf_args_session, mock_qemu_instance, mock_r
 
     # Verify the default run script
     expect_lines = [
-        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/riscv64-purecap/netperf/bin/netserver -x -y &", r"PID_5=\$!",
+        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/{instance.cheri_target}/netperf/bin/netserver -x -y &", r"PID_5=\$!",
         r"sysctl hw.qemu_trace_perthread=1",
-        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/riscv64-purecap/netperf/bin/netperf --foo --bar >> /root/benchmark-output/0/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
-        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/riscv64-purecap/netperf/bin/netperf --foo --bar >> /root/benchmark-output/1/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
+        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/{instance.cheri_target}/netperf/bin/netperf --foo --bar >> /root/benchmark-output/0/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
+        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/{instance.cheri_target}/netperf/bin/netperf --foo --bar >> /root/benchmark-output/1/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
         r"kill -TERM \$PID_5"
     ]
     check_lines_match(mock_run_script.getvalue().split("\n"), expect_lines)
@@ -182,10 +182,10 @@ def test_netperf_exec_task_qemu(netperf_qemu_session, mock_qemu_instance, mock_r
 
     # Verify the default run script
     expect_lines = [
-        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/riscv64-purecap/netperf/bin/netserver &", r"PID_5=\$!",
+        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/{instance.cheri_target}/netperf/bin/netserver &", r"PID_5=\$!",
         r"sysctl hw.qemu_trace_perthread=1",
-        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/riscv64-purecap/netperf/bin/netperf >> /root/benchmark-output/0/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
-        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/riscv64-purecap/netperf/bin/netperf >> /root/benchmark-output/1/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
+        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/{instance.cheri_target}/netperf/bin/netperf >> /root/benchmark-output/0/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
+        r"STATCOUNTERS_NO_AUTOSAMPLE=1 /opt/{instance.cheri_target}/netperf/bin/netperf >> /root/benchmark-output/1/netperf-exec-8bc941a3-f6d6-4d37-b193-4738f1da3dae.csv",
         r"kill -TERM \$PID_5"
     ]
     check_lines_match(mock_run_script.getvalue().split("\n"), expect_lines)

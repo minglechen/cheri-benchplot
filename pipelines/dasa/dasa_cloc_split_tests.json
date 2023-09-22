@@ -1,0 +1,156 @@
+{
+    "instance_config": {
+        "instances": [{
+            "kernel": "GENERIC-MORELLO-PURECAP",
+            "baseline": true,
+            "cheri_target": "morello-purecap",
+            "kernelabi": "purecap"
+        }]
+    },
+    "benchmark_config": [{
+        "name": "grpc-dasa-changes",
+        "desc": "Changes to gRPC for the DASA project",
+        "generators": [{
+            "handler": "cloc.generic",
+            "task_options": {
+                "repos": [{
+                    "name": "grpc w/o tests",
+                    "repo_path": "grpc",
+                    "baseline_ref": "v1.48.1",
+                    "head_ref": "grpc-1.48.1-cheri",
+                    "accept_ext": "\\.(?:c{1,2}|h)$",
+                    "accept_filter": [
+                        "^include",
+                        "^src/core",
+                        "^src/compiler",
+                        "^src/cpp"
+                    ],
+                    "reject_filter": [
+                        "^src/core/ext/upb-generated",
+                        "^src/core/ext/upbdefs-generated"
+                    ]
+                }, {
+                    "name": "grpc tests",
+                    "repo_path": "grpc",
+                    "baseline_ref": "v1.48.1",
+                    "head_ref": "grpc-1.48.1-cheri",
+                    "accept_ext": "\\.(?:c{1,2}|h)$",
+                    "accept_filter": [
+                        "test"
+                    ]
+                }, {
+                    "name": "upb w/o tests",
+                    "repo_path": "upb",
+                    "baseline_ref": "bef53686ec702607971bd3ea4d4fefd80c6cc6e8",
+                    "head_ref": "upb-grpc-cheri",
+                    "accept_ext": "\\.(?:c{1,2}|h)$",
+                    "accept_filter": [
+                        "upbc?"
+                    ],
+                    "reject_filter": [
+                        "upb/bindings",
+                        "upb/test_.*"
+                    ]
+                }, {
+                    "name": "upb tests",
+                    "repo_path": "upb",
+                    "baseline_ref": "bef53686ec702607971bd3ea4d4fefd80c6cc6e8",
+                    "head_ref": "upb-grpc-cheri",
+                    "accept_ext": "\\.(?:c{1,2}|h)$",
+                    "accept_filter": [
+                        "^upb/test"
+                    ]
+                }, {
+                    "name": "abseil-cpp w/o tests",
+                    "repo_path": "abseil-cpp",
+                    "baseline_ref": "20220623.0",
+                    "head_ref": "cheri/cheri-20220623.0",
+                    "accept_ext": "\\.(?:c{1,2}|h)$",
+                    "accept_filter": [
+                        "^absl"
+                    ],
+                    "reject_filter": [
+                        ".*_test\\."
+                    ]
+                }, {
+                    "name": "abseil-cpp tests",
+                    "repo_path": "abseil-cpp",
+                    "baseline_ref": "20220623.0",
+                    "head_ref": "cheri/cheri-20220623.0",
+                    "accept_ext": "\\.(?:c{1,2}|h)$",
+                    "accept_filter": [
+                        "^absl/.*_test\\."
+                    ]
+                }, {
+                    "name": "protobuf w/o tests",
+                    "repo_path": "protobuf",
+                    "baseline_ref": "21027a27c4c2ec1000859ccbcfff46d83b16e1ed",
+                    "head_ref": "v3.20.1-with-cheri-fixes",
+                    "accept_ext": "\\.(?:c{1,2}|h)",
+                    "accept_filter": [
+                        "^src/google"
+                    ],
+                    "reject_filter": [
+                        "tests?"
+                    ]
+                }, {
+                    "name": "protobuf tests",
+                    "repo_path": "protobuf",
+                    "baseline_ref": "21027a27c4c2ec1000859ccbcfff46d83b16e1ed",
+                    "head_ref": "v3.20.1-with-cheri-fixes",
+                    "accept_ext": "\\.(?:c{1,2}|h)",
+                    "accept_filter": [
+                        "^src/google/.*test"
+                    ]
+                }, {
+                    "name": "nginx w/o tests",
+                    "repo_path": "nginx",
+                    "baseline_ref": "057157dcdd47fbb690498a0feada5f28758ab236",
+                    "head_ref": "release-1.22.0-with-cheri-fixes",
+                    "accept_ext": "\\.(?:c{1,2}|h)",
+                    "accept_filter": [
+                        "^src"
+                    ],
+                    "reject_filter": [
+                        "^src/http/v2",
+                        "^src/http/v3",
+                        "^src/modules"
+                    ]
+                }, {
+                    "name": "postgres w/o tests",
+                    "repo_path": "postgres",
+                    "baseline_ref": "6e55ea79faa56db85a2b6c5bf94cee8acf8bfdb8",
+                    "head_ref": "15_beta4-cheri",
+                    "accept_ext": "\\.(?:c{1,2}|h|out|sql)",
+                    "accept_filter": [
+                        "^src"
+                    ],
+                    "reject_filter": [
+                        "^src/test"
+                    ]
+                }, {
+                    "name": "postgres tests",
+                    "repo_path": "postgres",
+                    "baseline_ref": "6e55ea79faa56db85a2b6c5bf94cee8acf8bfdb8",
+                    "head_ref": "15_beta4-cheri",
+                    "accept_ext": "\\.(?:c{1,2}|h|out|sql)",
+                    "accept_filter": [
+                        "^src/test"
+                    ]
+                }]
+            }
+        }]
+    }],
+    "analysis_config": {
+        "plot": {
+            "plot_output_format": ["pdf", "png"]
+        },
+        "tasks": [{
+            "handler": "cloc.plot-deltas",
+            "task_options": {}
+        }, {
+            "handler": "cloc.diff-summary-table",
+            "task_options": {}
+        }]
+    }
+}

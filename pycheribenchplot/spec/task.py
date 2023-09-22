@@ -1,13 +1,14 @@
 import typing
-from ..core.task import ExecutionTask, LocalFileTarget
+from ..core.task import ExecutionTask
 from ..qemu.task import QEMUTracingSetupTask
 from pathlib import Path
-from ..core.config import ConfigPath, TemplateConfig, ProfileConfig
+from ..core.config import ConfigPath, ProfileConfig, Config
+from ..core.artefact import LocalFileTarget
 from dataclasses import dataclass, field
 
 
 @dataclass
-class SpecRunConfig(TemplateConfig):
+class SpecRunConfig(Config):
 
     #: Path to the Spec2006 suite in the guest
     spec_path: ConfigPath = Path("/opt/spec2006")
@@ -25,7 +26,7 @@ class SpecRunConfig(TemplateConfig):
     spec_benchmark_options: typing.List[str] = field(default_factory=list)
 
     #: Benchmark profiling configuration
-    profile: ProfileConfig = field(default_factory=ProfileConfig)
+    # profile: ProfileConfig = field(default_factory=ProfileConfig)
 
     def __post_init__(self):
         assert self.spec_path.is_absolute(), "Remote SPEC suite path must be absolute"

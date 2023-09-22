@@ -5,16 +5,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ..core.config import (ConfigPath, DatasetArtefact, DatasetName, TemplateConfig)
+from ..core.config import Config, ConfigPath, DatasetArtefact, DatasetName
 from ..core.csv import CSVDataSetContainer
 from ..core.dataset import Field
 from ..core.procstat import ProcstatDataset
 
 
 @dataclass
-class NetperfRunConfig(TemplateConfig):
+class NetperfRunConfig(Config):
     #: Path to netperf/netserver in the guest
-    netperf_path: ConfigPath = Path("opt/{cheri_target}/netperf/bin")
+    netperf_path: ConfigPath = Path("opt/{instance.cheri_target}/netperf/bin")
 
     #: Actual benchmark options
     netperf_options: typing.List[str] = field(default_factory=list)

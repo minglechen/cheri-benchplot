@@ -1,0 +1,20 @@
+{
+    "instance_config": {
+        "instances": [{
+            "kernel": "GENERIC-MORELLO-PURECAP",
+            "baseline": true,
+            "cheri_target": "morello-purecap",
+            "kernelabi": "purecap"
+        }]
+    },
+    "benchmark_config": [{
+        "name": "demo-c18n-ktrace",
+        "desc": "Example to import and process ktrace domain transitions for c18n compartmentalisation",
+        "generators": [{
+            "handler": "c18n.ktrace-import",
+            "task_options": {
+                "kdump": "./ping-no-policy.txt"
+            }
+        }]
+    }]
+}

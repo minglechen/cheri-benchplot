@@ -1,5 +1,6 @@
-from ..core.analysis import (BenchmarkDataLoadTask, StatsByParamGroupTask, StatsForAllParamSetsTask)
-from ..core.task import AnalysisTask
+from pycheribenchplot.core.analysis import (AnalysisTask, BenchmarkDataLoadTask, StatsByParamGroupTask,
+                                            StatsForAllParamSetsTask)
+
 from .model import NetperfInputModel, NetperfStatsModel
 from .task import NetperfExecTask
 

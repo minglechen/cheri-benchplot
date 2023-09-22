@@ -3,3 +3,10 @@ __pycache__
 \#*
 docs/pycheribenchplot*
 docs/out
+out
+
+dist
+build
+pycheribenchplot/ext/lib
+*.egg-info
+.hypothesis

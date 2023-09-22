@@ -1,4 +1,6 @@
+import gzip
 import logging
+import shutil
 import subprocess
 import time
 import typing
@@ -78,6 +80,40 @@ def timing(name, level=logging.INFO, logger=None):
         logger.log(level, "%s in %.2fs", name, end - start)
 
 
+def resolve_system_command(name: str, logger: logging.Logger | None = None):
+    if logger is None:
+        logger = logging.getLogger("cheri-benchplot")
+    path = shutil.which(name)
+    if path is None:
+        logger.critical("Missing dependency %s, should be in your $PATH", name)
+        raise RuntimeError("Missing dependency")
+    return Path(path)
+
+
+@contextmanager
+def gzopen(path: Path, mode: str) -> typing.IO:
+    if path.suffix == ".gz":
+        openfn = gzip.open
+        if "b" not in mode and "t" not in mode:
+            mode += "t"
+    else:
+        openfn = open
+    with openfn(path, mode) as fileio:
+        yield fileio
+
+
+@contextmanager
+def gzopen(path: Path, mode: str) -> typing.IO:
+    if path.suffix == ".gz":
+        openfn = gzip.open
+        if "b" not in mode and "t" not in mode:
+            mode += "t"
+    else:
+        openfn = open
+    with openfn(path, mode) as fileio:
+        yield fileio
+
+
 class SubprocessHelper:
     """
     Helper to run a subprocess and live-capture the output into our logger.
@@ -108,6 +144,8 @@ class SubprocessHelper:
         self._subprocess = None
         #: Workers lock
         self._lock = Lock()
+        #: Level at which to log subprocess stderr
+        self._stderr_loglevel = logging.WARNING
 
     def __bool__(self):
         with self._lock:
@@ -148,6 +186,14 @@ class SubprocessHelper:
         assert self._subprocess is None, "Can not add observers after starting"
         self._err_observers.append(handler)
 
+    def set_stderr_loglevel(self, level: int):
+        """
+        Set level at which to log the subprocess stderr.
+
+        By default this is set to WARNING.
+        """
+        self._stderr_loglevel = level
+
     def run(self, **popen_kwargs):
         """
         Syncrhonously run the command and process output.
@@ -166,8 +212,8 @@ class SubprocessHelper:
                                             stdout=subprocess.PIPE,
                                             stderr=subprocess.PIPE,
                                             **popen_kwargs)
-        self._out_observers.append(lambda line: self.logger.debug(line))
-        self._err_observers.append(lambda line: self.logger.warning(line))
+        self._out_observers.append(lambda line: self.logger.debug(line.strip()))
+        self._err_observers.append(lambda line: self.logger.log(self._stderr_loglevel, line.strip()))
         self._out_worker = Thread(target=self._do_io, args=(self._subprocess.stdout, self._out_observers))
         self._out_worker.start()
         self._err_worker = Thread(target=self._do_io, args=(self._subprocess.stderr, self._err_observers))

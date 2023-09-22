@@ -3,34 +3,85 @@ The CHERI benchplot tool/library is an attempt to build a flexible system to run
 Ideally the structure is modular and reusable enough that it can be adapted to speed-up data analysis or used as a starting point
 for custom data analysis and visualization.
 
+## Installation
+
+The library has a number of python dependencies plus some C++ native modules for dwarf parsing.
+The latter requires the Cheri LLVM libraries to be installed in the cherisdk directory and the `boost::python` library.
+Cheri-benchplot requires a recent python version, it has been tested with Python 3.10+.
+
+The following commands should install the dependencies and the pycheribenchplot package:
+```
+# This must point to the root of the cherisdk, containing the rootfs and the 'sdk' directory.
+$ export CHERISDK=/path/to/cherisdk
+# It is recommended to setup a virtual environment
+$ virtualenv my-env
+$ source my-env/bin/activate
+(my-env) $ pip install .
+# To check that the installation succeeded:
+(my-env) $ benchplot-cli.py -h
+```
+
+It is possible to run tests as follows:
+```
+(my-env) $ pytest tests
+```
+
 ## Design
 The tool uses two configuration files:
- - user configuration: by default in `~/.config/cheri-benchplot.json`, specifies cheri SDK information
- - session configuration: specifies the benchmark/cheribsd instance combinations to run
- 
+ - User configuration: by default in `~/.config/cheri-benchplot.json`, specifies cheri SDK information.
+ - Pipeline configuration: specifies the data-generation tasks and cheribsd platform combinations to run.
+
 Currently the runner only supports starting up CHERI-QEMU instances for behavioural analysis and qemu tracing.
+There is some support for the VCU118 FPGA via cheribuild scripts.
 
-There are two modes of operation for the *benchplot* tool:
- - run: Run all combinations of instance/benchmarks in the given session configuration
- - analyse: Run all compatible analysis steps (e.g. table generators, plotting, integrity checks...)
-The `demo` directory contains examples for the configuration files.
+The main entry point is the `benchplot-cli` tool. This provides a number of subcommands:
+```
+(my-env) $ benchplot-cli.py
+usage: benchplot-cli.py [-h] [-v] [-l LOGFILE] [-w WORKERS] [-c CONFIG] {session,info} ...
 
-For each benchmark/instance combination a new `Benchmark` object is created. This represents a benchmark run and is uniquely
-identified by an UUID. The benchmark instance will manage the benchmark run and analysis for a benchmark/instance configuration pair.
-Each benchmark contains a set of datasets (`DataSetContainer`) that represent data sources.
-Each dataset is responsible for generating the commands to produce the data, extract the data from the instance
-once the benchmark is done, and load the data for later analysis.
+CHERI plot and data analysis tool benchplot-cli
 
-The analysis step is split in two phases:
- 1. For each recorded benchmark run, we load the raw data and identify the baseline benchmark run.
-    The datasets are merged into a single dataframe in the baseline benchmark run, then we aggregate
-    the data to compute statistical metrics (e.g. mean and median) across iterations and deltas between
-    the baseline and non-baseline runs.
- 2. All the analysis steps that depend on datasets we can provide are run. This step uses the loaded and
-    aggregated data from datasets and generates some output representation for it.
-    This is done to split the data ingestion and normalization from the actual data analysis and reporting.
+positional arguments:
+  {session,info}        command
+    session             Manage and ispect sessions.
+    info                Display information about tasks.
+
+options:
+  -h, --help            show this help message and exit
+  -v, --verbose         Verbose output
+  -l LOGFILE, --logfile LOGFILE
+                        logfile
+  -w WORKERS, --workers WORKERS
+                        Override max number of workers from configuration file
+  -c CONFIG, --config CONFIG
+                        User environment configuration file. Defaults to ~/.config/cheri-benchplot.json
+```
+
+The cheri-benchplot library operates around the notion of a *session*.
+A session is described by a _pipeline configuration file_ (see the json files in `pipelines/...`), which provides information about
+the tasks that generate the data and the analysis steps to generate output artefacts.
+When the session is created, the pipeline configuration is parsed and the combinations of platform configurations, parameterization and
+data generation tasks are resolved to produce a _benchmark matrix_ that represents all the data generation tasks that will produce inputs
+for the analysis.
+The benchmark matrix for a session can be displayed with `benchplot-cli.py info session path/to/session`.
+
+The session supports two main activities:
+    - Run: will execute all data generation tasks described by the benchmark matrix, along with any dependencies.
+    - Analyse: will run all the analysis tasks configured to produce the desired outputs.
+
+Tasks are logically organised into namespaces. This is used to filter tasks that are compatible with each other.
+For example, analysis tasks in the `foo` namespace should all be able to operate on data produced by generators in the `foo` namespace.
+
+At session creation, a new `Benchmark` object is created for each benchmark/instance combination.
+This represents a data-generation run and is uniquely identified by an UUID.
+The benchmark instance will manage the data-generation and analysis for a benchmark/instance configuration pair.
+Each benchmark contains a group of tasks (`ExecutionTask` subclasses) that represent data sources.
+These tasks are responsible for generating the commands to produce the data, extract the data from the target cheribsd (or other) instance
+once the benchmark is done, and load the data for analysis.
 
 ## Example
+
+ - XXX Rework this example to make it simpler.
 
 Required branches:
  - cheribsd: statcounters-update
@@ -65,7 +116,7 @@ The example runs a simple UDP_RR netperf benchmark and collects data from all su
     "cheribuild_path": "path/to/cheribuild/cheribuild.py"
 }
 ```
- 6. Run the demo session: 
+ 6. Run the demo session:
  ```
  python benchplot.py demo/demo-netperf-multi-instance/benchplot_config.json run
  python benchplot.py demo/demo-netperf-multi-instance/benchplot_config.json analyse

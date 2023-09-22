@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 
+from ..core.artefact import LocalFileTarget
 from ..core.config import InstancePlatform, ProfileConfig
-from ..core.task import ExecutionTask, LocalFileTarget
-from pathlib import Path
+from ..core.task import ExecutionTask, output
 
 
 class QEMUTracingSetupTask(ExecutionTask):
@@ -21,18 +21,12 @@ class QEMUTracingSetupTask(ExecutionTask):
 
     def get_qemu_profile_target(self) -> LocalFileTarget:
         """The QEMU trace output file path"""
-        return LocalFileTarget.from_benchmark(
-            self.benchmark, f"qemu-perfetto-{self.benchmark.uuid}.pb"
-        )
+        return LocalFileTarget(self, file_path=f"qemu-perfetto-{self.benchmark.uuid}.pb")
 
     def get_qemu_interceptor_target(self) -> LocalFileTarget:
         """The QEMU interceptor trace output file path"""
-        path = (
-            Path("qemu-trace")
-            / "qemu-trace-dir"
-            / f"qemu-perfetto-interceptor-{self.benchmark.uuid}.trace.gz"
-        )
-        return LocalFileTarget.from_benchmark(self.benchmark, path)
+        path = Path("qemu-trace-dir") / f"qemu-perfetto-interceptor-{self.benchmark.uuid}.trace.gz"
+        return LocalFileTarget(self, file_path=path)
 
     def run(self):
         if self.benchmark.config.instance.platform != InstancePlatform.QEMU:

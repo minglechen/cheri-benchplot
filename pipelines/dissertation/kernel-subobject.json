@@ -1,0 +1,34 @@
+{
+    "instance_config": {
+        "instances": [{
+            "name": "Cheri-riscv64 purecap",
+            "kernel": "CHERI-PURECAP-QEMU",
+            "baseline": true,
+            "cheri_target": "riscv64-purecap",
+            "kernelabi": "purecap"
+        }, {
+            "name": "Morello purecap",
+            "kernel": "GENERIC-MORELLO-PURECAP",
+            "baseline": false,
+            "cheri_target": "morello-purecap",
+            "kernelabi": "purecap"
+        }]
+    },
+    "benchmark_config": [{
+        "name": "cheribsd-subobj-eval",
+        "desc": "CheriBSD sub-object bounds evaluation",
+        "iterations": 1,
+        "generators": [{
+            "handler": "subobject.extract-imprecise",
+            "task_options": {
+                "dwarf_data_sources": [{
+                    "path": "{user.build_path}/cheribsd-{instance.cheri_target}-build",
+                    "match": ".*/{instance.kernel}/.*/.*\\.ko\\.full"
+                }, {
+                    "path": "{user.build_path}/cheribsd-{instance.cheri_target}-build",
+                    "match": ".*/{instance.kernel}/kernel.full"
+                }]
+            }
+        }]
+    }]
+}

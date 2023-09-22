@@ -7,10 +7,30 @@ import numpy as np
 import pandas as pd
 from pandera import Field
 
+from .artefact import DataFrameTarget, DataRunAnalysisFileTarget
 from .benchmark import Benchmark
 from .config import AnalysisConfig, Config
 from .model import DataModel
-from .task import AnalysisTask, DataFrameTarget, ExecutionTask, PlotTarget
+from .task import ExecutionTask, SessionExecutionTask, SessionTask
+
+
+class AnalysisTask(SessionTask):
+    """
+    Analysis tasks that perform anythin from plotting to data checks and transformations.
+    This is the base class for all public analysis steps that are allocated by the session.
+    Analysis tasks are not necessarily associated to a single benchmark. In general they reference the
+    current session and analysis configuration, subclasses may be associated to a benchmark context.
+
+    Note that this currently assumes that tasks with the same name are not issued
+    more than once for each benchmark run UUID. If this is violated, we need to
+    change the task ID generation.
+    """
+    task_namespace = "analysis"
+
+    def __init__(self, session: "Session", analysis_config: AnalysisConfig, task_config: Config = None):
+        super().__init__(session, task_config=task_config)
+        #: Analysis configuration for this invocation
+        self.analysis_config = analysis_config
 
 
 class BenchmarkAnalysisTask(AnalysisTask):
@@ -18,13 +38,22 @@ class BenchmarkAnalysisTask(AnalysisTask):
     Base class for analysis tasks that operate on a single benchmark context.
     These generally used to perform per-benchmark operations such as loading
     benchmark output data, pre-processing and preliminary aggregation.
+
+    XXX These tasks must be scheduled by a session-wide :class:`AnalysisTask` as currently the
+    session analysis system is not smart enough to create multiple of these tasks.
     """
     task_namespace = "analysis.benchmark"
 
     def __init__(self, benchmark: Benchmark, analysis_config: AnalysisConfig, task_config: Config = None):
-        super().__init__(benchmark.session, analysis_config, task_config=task_config)
         #: The associated benchmark context
         self.benchmark = benchmark
+
+        # Borg initialization occurs here
+        super().__init__(benchmark.session, analysis_config, task_config=task_config)
+
+    @classmethod
+    def is_benchmark_task(cls):
+        return True
 
     @property
     def uuid(self):
@@ -62,9 +91,11 @@ class MachineGroupAnalysisTask(AnalysisTask):
         :param g_uuid: The machine configuration ID for this group.
         :param task_config: Optional task configuration.
         """
-        super().__init__(session, analysis_config, task_config=task_config)
         #: The associated group uuid
         self.g_uuid = g_uuid
+
+        # Borg state initialization occurs here
+        super().__init__(session, analysis_config, task_config=task_config)
 
     @property
     def task_id(self):
@@ -87,38 +118,18 @@ class ParamGroupAnalysisTask(AnalysisTask):
                  analysis_config: AnalysisConfig,
                  parameters: dict[str, any],
                  task_config: Config = None):
-        super().__init__(session, analysis_config, task_config=task_config)
         #: The baseline group uuid
         self.baseline = session.baseline_g_uuid
         #: The set of parameters identifying the target benchmark matrix row
         self.parameters = parameters
 
+        # Borg state initialization occurs here
+        super().__init__(session, analysis_config, task_config=task_config)
+
     @property
     def task_id(self):
         parameter_set = ":".join([f"{key}={value}" for key, value in self.parameters.items()])
         return f"{self.task_namespace}.{self.task_name}-{parameter_set}"
-
-
-class PlotTask(AnalysisTask):
-    """
-    Base class for plotting tasks.
-    Plot tasks generate one or more plots from some analysis task data.
-    These are generally the public-facing tasks that are selected in the analysis
-    configuration.
-    Each plot task is responsible for setting up a figure and axes.
-    Note that the ID of the task is generated assuming that there is only one plot per session.
-    """
-    task_namespace = "analysis.plot"
-
-    def __init__(self, session: "Session", analysis_config: AnalysisConfig, task_config: Config = None):
-        super().__init__(session, analysis_config, task_config=task_config)
-
-    def _plot_output(self, suffix: str = None) -> PlotTarget:
-        if suffix:
-            name = f"{self.task_id}-{suffix}.pdf"
-        else:
-            name = f"{self.task_id}.pdf"
-        return PlotTarget(self.session.get_plot_root_path() / name)
 
 
 class BenchmarkDataLoadTask(BenchmarkAnalysisTask):
@@ -141,8 +152,10 @@ class BenchmarkDataLoadTask(BenchmarkAnalysisTask):
     model: typing.Type[DataModel] = None
 
     def __init__(self, benchmark: Benchmark, analysis_config: AnalysisConfig, **kwargs):
-        super().__init__(benchmark, analysis_config, **kwargs)
         self._df = []
+
+        # Borg state initialization occurs here
+        super().__init__(benchmark, analysis_config, **kwargs)
 
     def _parameter_index_columns(self):
         if self.benchmark.config.parameters:
@@ -186,6 +199,8 @@ class BenchmarkDataLoadTask(BenchmarkAnalysisTask):
 
         # Now set the index based on the data model definition and proceed to validate
         schema = self.model.to_schema(self.session)
+        if set(df.index.names).intersection(schema.index.names):
+            df = df.reset_index()
         df.set_index(schema.index.names, inplace=True)
         valid_df = schema.validate(df)
         self._df.append(df)
@@ -212,10 +227,26 @@ class BenchmarkDataLoadTask(BenchmarkAnalysisTask):
         df["iteration"] = iteration
         self._append_df(df)
 
+    def _resolve_dependencies(self, target_task):
+        for d in target_task.dependencies():
+            target_task.resolved_dependencies.add(d)
+            self._resolve_dependencies(d)
+
     def run(self):
-        target_task = self.exec_task(self.benchmark,
-                                     script=None,
-                                     task_config=self.benchmark.config.benchmark.task_options)
+        target_qualified_name = self.exec_task.task_name
+        if self.exec_task.task_namespace:
+            target_qualified_name = self.exec_task.task_namespace + "." + target_qualified_name
+        for target_config in self.benchmark.config.generators:
+            if target_config.handler == target_qualified_name:
+                break
+            # Try to recursively look at their dependencies?
+        else:
+            raise ValueError(f"Could not find configuration for generator task {target_qualified_name}")
+
+        target_task = self.exec_task(self.benchmark, script=None, task_config=target_config.task_options)
+        # Must ensure that the dependencies side-effects have been produced,
+        # this is required if output from dependencies are forwarded.
+        self._resolve_dependencies(target_task)
         target = target_task.output_map.get(self.target_key)
         if target is None:
             self.logger.error("%s can not load data from task %s, output key %s missing", self, target_task,
@@ -223,7 +254,7 @@ class BenchmarkDataLoadTask(BenchmarkAnalysisTask):
             raise KeyError(f"{self.target_key} is not in task output_map")
         if not target.is_file():
             raise NotImplementedError("BenchmarkDataLoadTask only supports loading from files")
-        for i, path in enumerate(target.paths):
+        for i, path in enumerate(target.paths()):
             if not path.exists():
                 self.logger.error("Can not load %s, does not exist", path)
                 raise FileNotFoundError(f"{path} does not exist")
@@ -237,7 +268,7 @@ class BenchmarkDataLoadTask(BenchmarkAnalysisTask):
         Note that the target data will be valid only after the Task.completed
         flag has been set.
         """
-        yield "df", DataFrameTarget(self.model.to_schema(self.session))
+        yield "df", DataFrameTarget(self, self.model)
 
 
 class StatsByParamGroupTask(ParamGroupAnalysisTask):
@@ -257,9 +288,11 @@ class StatsByParamGroupTask(ParamGroupAnalysisTask):
     extra_group_keys: list[str] = []
 
     def __init__(self, session, analysis_config, parameters, **kwargs):
-        super().__init__(session, analysis_config, parameters, **kwargs)
         self._merged_df = None
         self._df = None
+
+        # Borg state initialization occurs here
+        super().__init__(session, analysis_config, parameters, **kwargs)
 
     def _make_load_depend(self, benchmark: Benchmark):
         return self.load_task(benchmark, self.analysis_config)
@@ -431,8 +464,8 @@ class StatsByParamGroupTask(ParamGroupAnalysisTask):
         self.output_map["df"].assign(delta_df)
 
     def outputs(self):
-        yield "merged_df", DataFrameTarget(self.load_task.model.to_schema(self.session))
-        yield "df", DataFrameTarget(self.model.to_schema(self.session))
+        yield "merged_df", DataFrameTarget(self, self.load_task.model)
+        yield "df", DataFrameTarget(self, self.model)
 
 
 def StatsField(name, **kwargs):
@@ -456,11 +489,13 @@ class StatsForAllParamSetsTask(AnalysisTask):
     model: typing.Type[DataModel] = None
 
     def __init__(self, session, analysis_config, **kwargs):
-        super().__init__(session, analysis_config, **kwargs)
         #: The merged dataframe with all unaggregated data.
         self._merged_df = None
         #: The output dataframe, after the task is completed.
         self._df = None
+
+        # Borg state initialization occurs here
+        super().__init__(session, analysis_config, **kwargs)
 
     def _output_df(self) -> pd.DataFrame:
         """
@@ -489,5 +524,5 @@ class StatsForAllParamSetsTask(AnalysisTask):
         self.output_map["df"].assign(stats_frames)
 
     def outputs(self):
-        yield "merged_df", DataFrameTarget(self.stats_task.load_task.model.to_schema(self.session))
-        yield "df", DataFrameTarget(self.model.to_schema(self.session))
+        yield "merged_df", DataFrameTarget(self, self.stats_task.load_task.model)
+        yield "df", DataFrameTarget(self, self.model)

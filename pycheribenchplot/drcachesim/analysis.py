@@ -3,14 +3,14 @@ import typing
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core.analysis import AnalysisTask, AnalysisConfig
-from ..core.config import ConfigPath, TemplateConfig, Config
 from .task import DrCacheSimRunTask, DrCacheSimRunConfig
 from ..addr2line.task import Addr2LineTask, Addr2LineConfig
+from ..core.analysis import AnalysisTask
+from ..core.config import Config, ConfigPath
 
 
 @dataclass
-class DrCacheSimConfig(TemplateConfig):
+class DrCacheSimConfig(Config):
     drrun_path: ConfigPath = Path("dynamorio/bin64/drrun")
     remove_saved_results: bool = False
     LL_cache_sizes: typing.List[str] = field(default_factory=list)
@@ -21,7 +21,7 @@ class DrCacheSimConfig(TemplateConfig):
 
 
 @dataclass
-class InstrCountRunConfig(TemplateConfig):
+class InstrCountRunConfig(Config):
     drrun_path: ConfigPath = Path("dynamorio/bin64/drrun")
     remove_saved_results: bool = False
 

@@ -1,0 +1,35 @@
+{
+    "concurrent_instances": 1,
+    "instance_config": {
+        "instances": [{
+            "kernel": "CHERI-PURECAP-QEMU",
+            "baseline": true,
+            "cheri_target": "riscv64-purecap",
+            "kernelabi": "purecap"
+        }, {
+            "kernel": "CHERI-PURECAP-GFE",
+            "baseline": false,
+            "cheri_target": "riscv64-purecap",
+            "kernelabi": "purecap",
+            "platform": "vcu118"
+        }, {
+            "kernel": "GENERIC-MORELLO-PURECAP",
+            "baseline": false,
+            "cheri_target": "morello-purecap",
+            "kernelabi": "purecap"
+        }]
+    },
+    "benchmark_config": [{
+        "name": "cheribsd-history",
+        "desc": "CheriBSD cloc diff with cdb",
+        "iterations": 1,
+        "generators": [{
+            "handler": "kernel-history.cheribsd-diff"
+        }, {
+            "handler": "kernel-history.cheribuild-cdb-trace",
+            "task_options": {
+                "ephemeral_build_root": false
+            }
+        }]
+    }]
+}

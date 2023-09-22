@@ -2,195 +2,234 @@
 
 import argparse as ap
 import logging
+import re
 import traceback
 import uuid
+from dataclasses import MISSING, fields
 from json.decoder import JSONDecodeError
 from pathlib import Path
 
 from marshmallow.exceptions import ValidationError
+from typing_inspect import is_generic_type
 
 from pycheribenchplot.core.config import (AnalysisConfig, BenchplotUserConfig, PipelineConfig, TaskTargetConfig)
+from pycheribenchplot.core.error import ToolArgparseError
 from pycheribenchplot.core.session import Session
-from pycheribenchplot.core.util import setup_logging
-
-# Global logger from the logging setup
-logger = None
+from pycheribenchplot.core.task import TaskRegistry
+from pycheribenchplot.core.tool import CommandLineTool, SubCommand
 
 
-def add_session_spec_options(parser):
+class SessionSubCommand(SubCommand):
     """
-    Helper to add options to identify a session
+    Manage and ispect sessions.
     """
-    session_name = parser.add_argument("session_path", type=Path, help="Path or name of the target session")
+    name = "session"
 
+    def register_options(self, parser):
+        super().register_options(parser)
 
-def resolve_session(user_config, session_path):
-    session = Session.from_path(user_config, session_path)
-    if not session:
-        logger.error("Session %s does not exist", session_path)
-        exit(1)
-    return session
+        session_subparsers = parser.add_subparsers(help="Action", dest="session_action")
 
+        sub_create = session_subparsers.add_parser("create", help="Create a new session from the given configuration.")
+        sub_create.add_argument("pipeline_config", type=Path, help="Path to the pipeline configuration file.")
+        self._register_session_arg(sub_create)
+        sub_create.add_argument("-f",
+                                "--force",
+                                action="store_true",
+                                help="Force re-create the session if it already exists. Use with caution.")
 
-def list_session(session):
-    configurations = session.config.configurations
-    print(f"Session {session.config.name} ({session.config.uuid}):")
-    for c in session.config.configurations:
-        print("\t", c)
+        sub_run = session_subparsers.add_parser("run",
+                                                help="Run the session datagen tasks, this must be done "
+                                                "before data can be analysed.")
+        self._register_session_arg(sub_run)
+        sub_run.add_argument("--shellgen-only",
+                             action="store_true",
+                             help="Only perform shell script generation and stop before running anything.")
 
+        sub_clean = session_subparsers.add_parser("clean", help="Clean session data and plots.")
+        self._register_session_arg(sub_clean)
 
-def list_tasks(session):
-    """
-    Helper to display public tasks for a given session
-    """
-    print("Public analysis targets:")
-    for task in session.get_public_tasks():
-        spec_line = f"{task.task_namespace}.{task.task_name} ({task.__name__})"
-        print("\t", spec_line)
+        sub_analyse = session_subparsers.add_parser("analyse", help="Process data and generate plots.")
+        self._register_session_arg(sub_analyse)
+        sub_analyse.add_argument("-a",
+                                 "--analysis-config",
+                                 type=Path,
+                                 default=None,
+                                 help="Analysis configuration file.")
+        sub_analyse.add_argument("-t",
+                                 "--task",
+                                 type=str,
+                                 action="append",
+                                 help="Task names to run for the analysis. This is a convenience shorthand "
+                                 "for the full analysis configuration")
+        sub_analyse.add_argument("--clean", action="store_true", help="Wipe analysis outputs before running.")
 
+        sub_bundle = session_subparsers.add_parser("bundle",
+                                                   help="Create a session archive with all the generated content.")
+        self._register_session_arg(sub_bundle)
 
-def handle_command(user_config: BenchplotUserConfig, args):
-    if args.command == "session":
-        try:
-            config = PipelineConfig.load_json(args.pipeline_config)
-            session = Session.from_path(user_config, args.session_path)
-        except JSONDecodeError as ex:
-            logger.error("Malformed pipeline configuration %s: %s", args.pipeline_config, ex)
-            raise
-        except ValidationError as ex:
-            logger.error("Invalid pipeline configuration %s: %s", args.pipeline_config, ex)
-            raise
+    def handle_create(self, user_config, args):
+        """
+        Hook to handle the create subcommand.
+        """
+        config = self._parse_config(args.pipeline_config, PipelineConfig)
+
+        session = self._get_session(user_config, args, missing_ok=True)
         if not session:
-            session = Session.make_new(user_config, config, args.session_path)
+            session = Session.make_new(user_config, config, args.target)
         elif args.force:
             session.delete()
-            session = Session.make_new(user_config, config, args.session_path)
+            session = Session.make_new(user_config, config, args.target)
         else:
-            logger.error("Session %s already exists", args.session_path)
-            exit(1)
-    elif args.command == "run":
-        session = resolve_session(user_config, args.session_path)
+            self.logger.error("Session %s already exists", args.target)
+            raise FileExistsError(f"Session {args.target} already exists")
+
+    def handle_run(self, user_config, args):
+        """
+        Hook to handle the run subcommand.
+        """
+        session = self._get_session(user_config, args)
         session.run("shellgen" if args.shellgen_only else "full")
-    elif args.command == "analyse":
-        session = resolve_session(user_config, args.session_path)
+
+    def handle_clean(self, user_config, args):
+        # XXX add safety net question?
+        session = self._get_session(user_config, args)
+        session.clean_all()
+
+    def handle_analyse(self, user_config, args):
+        session = self._get_session(user_config, args)
+
         if args.clean:
             session.clean_analysis()
+
+        # Use the analysis configuration from the session by default
+        analysis_config = None
         if args.analysis_config:
-            analysis_config = AnalysisConfig.load_json(args.analysis_config)
-        else:
+            analysis_config = self._parse_config(args.analysis_config, AnalysisConfig)
+        elif args.task:
             analysis_config = AnalysisConfig()
             for task in args.task:
-                analysis_config.handlers.append(TaskTargetConfig(handler=task))
+                analysis_config.tasks.append(TaskTargetConfig(handler=task))
         session.analyse(analysis_config)
-    elif args.command == "clean":
-        # XXX add safety net question?
-        session = resolve_session(user_config, args.session_path)
-        session.clean_all()
-    elif args.command == "show":
-        if args.session_path:
-            session = resolve_session(user_config, args.session_path)
-        else:
-            session = None
-        if args.what == "info":
-            list_session(session)
-        elif args.what == "tasks":
-            list_tasks(session)
-    elif args.command == "bundle":
-        session = resolve_session(user_config, args.session_path)
+
+    def handle_bundle(self, user_config, args):
+        session = self._get_session(user_config, args)
         session.bundle()
-    else:
-        # No command
-        parser.print_help()
-        exit(1)
+
+    def handle(self, user_config, args):
+        if args.session_action is None:
+            raise ToolArgparseError("Missing session action")
+        handler_name = f"handle_{args.session_action}"
+        handler = getattr(self, handler_name)
+        handler(user_config, args)
+
+
+class TaskInfoSubCommand(SubCommand):
+    """
+    Display information about tasks.
+    """
+    name = "info"
+
+    def register_options(self, parser):
+        super().register_options(parser)
+
+        info_subparsers = parser.add_subparsers(help="Action", dest="info_action")
+
+        sub_session = info_subparsers.add_parser("session", help="Display information about an existing session")
+        self._register_session_arg(sub_session)
+        sub_session.add_argument("-a",
+                                 "--show-analysis-tasks",
+                                 action="store_true",
+                                 help="Show compatible analysis tasks")
+
+        sub_task = info_subparsers.add_parser("task", help="Display information about a task")
+        sub_task.add_argument("task_spec", nargs="+", help="Name(s) of task(s) to describe")
+
+        sub_config = info_subparsers.add_parser("config", help="Display configuration information")
+        sub_config.add_argument("-u",
+                                "--user",
+                                type=Path,
+                                required=False,
+                                default=None,
+                                help="Generate a default user configuration file")
+
+    def handle_session(self, user_config, args):
+        """
+        Display information about the tasks and the data within a session.
+        """
+        session = self._get_session(user_config, args)
+        configurations = session.config.configurations
+        print(f"Session {session.config.name} ({session.config.uuid}):")
+        for c in session.config.configurations:
+            print("\t", c)
+
+        if args.show_analysis_tasks:
+            print("\tAvailable analysis tasks:\n")
+            for task in session.get_public_tasks():
+                spec_line = f"{task.task_namespace}.{task.task_name} ({task.__name__})"
+                print("\t", spec_line)
+
+    def handle_task(self, user_config, args):
+        """
+        Display task information.
+        """
+        for task_class in TaskRegistry.iter_public():
+            match = False
+            for matcher in args.task_spec:
+                match = re.match(matcher, f"{task_class.task_namespace}.{task_class.task_name}")
+                if match:
+                    break
+            if not match:
+                continue
+            # Dump the task
+            spec_line = f"# {task_class.task_namespace}.{task_class.task_name} ({task_class.__name__}):\n"
+            spec_line += task_class.__doc__ + "\n"
+            if task_class.task_config_class:
+                ## XXX the config printing logic should probably go in core/config.py
+                conf_name = task_class.task_config_class.__name__
+                spec_line += f"## Using configuration {conf_name}:"
+                spec_line += task_class.task_config_class.__doc__ + "\n"
+                spec_line += "    Configuration fields:\n"
+                for field in fields(task_class.task_config_class):
+                    if field.default != MISSING:
+                        default = "= " + str(field.default)
+                    elif field.default_factory != MISSING:
+                        default = "= <factory>"
+                    else:
+                        default = "<required>"
+                    dtype = field.type if is_generic_type(field.type) else field.type.__name__
+                    dtype = str(dtype).split(".")[-1]
+                    spec_line += f"\t{field.name}: {field.type} {default}\n"
+            print(spec_line)
+
+    def handle_config(self, user_config, args):
+        """
+        Help information about configurations.
+
+        Without any arguments, this will dump the existing user config,
+        or a default one if none is found.
+        """
+        if args.u:
+            if args.u.exists():
+                self.logger.warning("User configuration file already exists: %s", args.u)
+            with open(args.u, "w+") as outconfig:
+                outconfig.write(BenchplotUserConfig().emit_json())
+        else:
+            print(user_config.emit_json())
+
+    def handle(self, user_config, args):
+        if args.info_action is None:
+            raise ToolArgparseError("Missing info action")
+        handler_name = f"handle_{args.info_action}"
+        handler = getattr(self, handler_name)
+        handler(user_config, args)
 
 
 def main():
-    parser = ap.ArgumentParser(description="Benchmark run and plot tool")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
-    parser.add_argument("-l", "--logfile", type=Path, help="logfile", default=None)
-    parser.add_argument("-w",
-                        "--workers",
-                        type=int,
-                        help="Override max number of workers from configuration file",
-                        default=None)
-    parser.add_argument("-c",
-                        "--config",
-                        type=Path,
-                        help="User environment configuration file",
-                        default=Path("~/.config/cheri-benchplot.json").expanduser())
-    sub = parser.add_subparsers(help="command", dest="command")
-
-    sub_session = sub.add_parser("session", help="create a new session from the given configuration")
-    add_session_spec_options(sub_session)
-    sub_session.add_argument("pipeline_config", type=Path, help="New analysis pipeline configuration file")
-    sub_session.add_argument("-f", "--force", action="store_true", help="Force rebuild if existing")
-
-    sub_run = sub.add_parser("run", help="run benchmarks in configuration")
-    add_session_spec_options(sub_run)
-    sub_run.add_argument("--shellgen-only",
-                         action="store_true",
-                         help="Only perform shell script generation and stop before running any instance")
-
-    sub_analyse = sub.add_parser("analyse", help="process benchmarks and generate plots")
-    add_session_spec_options(sub_analyse)
-    sub_analyse.add_argument("-a", "--analysis-config", type=Path, help="Analysis configuration file", default=None)
-    sub_analyse.add_argument(
-        "-t",
-        "--task",
-        type=str,
-        nargs="+",
-        help="Task names to run for the analysis. This is a convenience shorthand for the full analysis configuration")
-    sub_analyse.add_argument("--clean", action="store_true", help="Wipe analysis outputs before running")
-
-    sub_clean = sub.add_parser("clean", help="clean output directory")
-    add_session_spec_options(sub_clean)
-
-    sub_list = sub.add_parser("show", help="Show session contents and other information")
-    sub_list.add_argument("what", choices=["info", "tasks"], help="What to show")
-    sub_list.add_argument("session_path", type=Path, help="Path of the target session", nargs='?')
-
-    sub_bundle = sub.add_parser("bundle", help="create a session archive")
-    sub_bundle.add_argument("session_path", type=Path, help="Path of the target session")
-
-    args = parser.parse_args()
-    if args.command is None:
-        parser.print_help()
-        exit(1)
-
-    global logger
-    logger = setup_logging(args.verbose, args.logfile)
-    logger.debug("Loading user config %s", args.config)
-    if not args.config.exists():
-        logger.error("Missing user configuration file %s", args.config)
-        exit(1)
-
-    try:
-        if args.config.exists():
-            user_config = BenchplotUserConfig.load_json(args.config)
-        else:
-            logger.debug("Missing user config, using defaults")
-        user_config.verbose = args.verbose
-    except JSONDecodeError as ex:
-        logger.error("Malformed user configuration %s: %s", args.config, ex)
-        if args.verbose:
-            traceback.print_exception(ex)
-            exit(1)
-
-    if args.workers:
-        # The argument takes precedence over everything
-        user_config.concurrent_workers = args.workers
-
-    # Adjust log level
-    if user_config.verbose:
-        logger.setLevel(logging.DEBUG)
-
-    try:
-        handle_command(user_config, args)
-    except Exception as ex:
-        logger.error("Failed to run command '%s'", args.command)
-        if args.verbose:
-            traceback.print_exception(ex)
-        exit(1)
+    cli = CommandLineTool("benchplot-cli")
+    cli.add_subcommand(SessionSubCommand())
+    cli.add_subcommand(TaskInfoSubCommand())
+    cli.setup()
 
 
 if __name__ == "__main__":

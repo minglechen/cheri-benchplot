@@ -5,9 +5,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from pycheribenchplot.core.analysis import PlotTask
-from pycheribenchplot.core.plot import new_figure
-from pycheribenchplot.core.task import PlotTarget
+from pycheribenchplot.core.plot import PlotTarget, PlotTask, new_figure
 from pycheribenchplot.netperf.analysis import NetperfStatsMergedParams
 
 

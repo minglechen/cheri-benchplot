@@ -1,0 +1,18 @@
+{
+    "instance_config": {
+        "instances": [{
+            "kernel": "CHERI-PURECAP-QEMU",
+            "baseline": true,
+            "cheri_target": "riscv64-purecap",
+            "kernelabi": "purecap"
+        }]
+    },
+    "benchmark_config": [{
+        "name": "cheribsd-history",
+        "desc": "CheriBSD cloc diff",
+        "iterations": 1,
+        "generators": [{
+            "handler": "kernel-history.cheribsd-diff"
+        }]
+    }]
+}

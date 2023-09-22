@@ -1,18 +1,18 @@
 import dataclasses as dc
 import multiprocessing as mp
 import re
-import typing
 from collections import defaultdict
+from collections.abc import Iterable
 from contextlib import ExitStack, contextmanager
-from pathlib import Path
 from queue import Queue
 from threading import Condition, Event, Lock, Semaphore, Thread
+from typing import Any, Callable, ContextManager, Hashable, Iterable, Type
 
 import networkx as nx
-import pandas as pd
-import pandera as pa
 
-from .config import AnalysisConfig, Config
+from .borg import Borg
+from .config import Config
+from .error import MissingDependency, TaskNotFound
 from .util import new_logger
 
 
@@ -22,6 +22,18 @@ class WorkerShutdown(Exception):
     """
 
     pass
+
+
+@dc.dataclass
+class TargetRef:
+    """
+    Internal helper for targets
+    """
+
+    #: The unique key for the target
+    name: str
+    #: The attribute name for the target in the Task subclass.
+    attr: str
 
 
 class TaskRegistry(type):
@@ -36,11 +48,24 @@ class TaskRegistry(type):
     public_tasks = defaultdict(dict)
     all_tasks = defaultdict(dict)
 
-    def __init__(self, name: str, bases: typing.Tuple[typing.Type], kdict: dict):
+    def __new__(mcls, name: str, bases: tuple[Type], kdict: dict):
+        """
+        Add two registry attributes to each task class.
+        The output_registry maintains a set of output generators for the class.
+        The deps_registry maintins a set of dependency generators for the class.
+        """
+        kdict["_output_registry"] = {}
+        kdict["_deps_registry"] = []
+        return super().__new__(mcls, name, bases, kdict)
+
+    def __init__(self, name: str, bases: tuple[Type], kdict: dict):
         super().__init__(name, bases, kdict)
         if self.task_name is None or self.task_namespace is None:
             # Skip, this is an abstract task
             return
+        if self.task_config_class:
+            assert dc.is_dataclass(self.task_config_class), "Task configuration must be a dataclass"
+            assert issubclass(self.task_config_class, Config), "Task configuration must inherit Config"
         ns = TaskRegistry.all_tasks[self.task_namespace]
         if self.task_name in ns:
             raise ValueError(
@@ -50,12 +75,23 @@ class TaskRegistry(type):
         if self.public:
             ns = TaskRegistry.public_tasks[self.task_namespace]
             ns[self.task_name] = self
+        for base in bases:
+            if hasattr(base, "_deps_registry"):
+                self._deps_registry.extend(base._deps_registry)
+            if hasattr(base, "_output_registry"):
+                self._output_registry.update(base._output_registry)
 
     def __str__(self):
         return f"<Task {self.__name__}: spec={self.task_namespace}.{self.task_name}>"
 
+    def register_dependency(cls, name):
+        cls._deps_registry.append(name)
+
+    def register_output(cls, ref: TargetRef):
+        cls._output_registry[ref.name] = ref.attr
+
     @classmethod
-    def resolve_exec_task(cls, task_spec: str) -> typing.Type["Task"] | None:
+    def resolve_exec_task(cls, task_spec: str) -> Type["Task"] | None:
         """
         Find the exec task named by the given task specifier.
 
@@ -78,7 +114,7 @@ class TaskRegistry(type):
         return task
 
     @classmethod
-    def resolve_task(cls, task_spec: str) -> list[typing.Type["Task"]]:
+    def resolve_task(cls, task_spec: str) -> list[Type["Task"]]:
         """
         Find the task named by the given task specifier.
 
@@ -98,44 +134,45 @@ class TaskRegistry(type):
             return [task]
         return []
 
-
-class Target:
-    """
-    Helper to represent output artifacts of a task.
-    This is the base class to also support non-file targets if necessary.
-    """
-
-    def is_file(self):
-        """
-        When true, the target should be a subclass of :class:`FileTarget`
-        """
-        return False
+    @classmethod
+    def iter_public(cls) -> "Generator[Type[Task]]":
+        for ns, tasks in cls.public_tasks.items():
+            for key, t in tasks.items():
+                yield t
 
 
-class Task(metaclass=TaskRegistry):
+# Check that a task_namespace and task_name are valid
+TASK_NAME_REGEX = re.compile(r"[\S.-]+")
+
+
+class Task(Borg, metaclass=TaskRegistry):
     """
     Abstract base class for dataset operations.
     This can be a task to run a benchmark or perform an analysis step.
-    Tasks in the pipeline have determined inputs and outputs that are derived from the session that
-    creates the tasks.
-    Tasks start as individual entities. When scheduled, if multiple tasks have the same ID, one task instance will be elected as the main task, the others will be attached to it as drones.
-    The drones will share the task state with the main task instance to maintain consistency
-    when producing stateful task outputs. This is a relatively strange dynamic Borg pattern.
+    Tasks in the pipeline have determined inputs and outputs that are derived
+    from the session that creates the tasks.
+    Tasks start as individual entities. When scheduled, if multiple tasks have
+    the same ID, one task instance will be elected as the main task, the others
+    will be attached to it as drones.
+    The drones will share the task state with the main task instance to
+    maintain consistency when producing stateful task outputs.
+    This is a relatively strange dynamic Borg pattern.
     """
-
-    #: Mark the task as a top-level target
+    #: Mark the task as a top-level target, which can be named in configuration files and from CLI commands.
     public = False
     #: Human-readable task namespace, used for task identification
     task_namespace = None
     #: Human-readable task identifier, used for task identification
     task_name = None
     #: If set, use the given Config class to unpack the task configuration
-    task_config_class: typing.Type[Config] = None
+    task_config_class: Type[Config] = None
 
     def __init__(self, task_config: Config = None):
-        assert (
-            self.task_name is not None
-        ), f"Attempted to use task with uninitialized name {self.__class__.__name__}"
+        assert self.task_name is not None, f"Attempted to use task with uninitialized name {self.__class__.__name__}"
+        assert self.task_namespace is None or TASK_NAME_REGEX.match(
+            self.task_namespace), f"Invalid task namespace '{self.task_namespace}'"
+        assert TASK_NAME_REGEX.match(self.task_name), f"Invalid task name '{self.task_name}'"
+
         #: task-specific configuration options, if any
         self.config = task_config
         #: task logger
@@ -146,13 +183,20 @@ class Task(metaclass=TaskRegistry):
         self.failed = None
         #: set of tasks we resolved that we depend upon, this is filled by the scheduler
         self.resolved_dependencies = set()
-        #: collected outputs. This currently caches the results from output_map(). Ideally, however,
-        #: this should be filled either by the scheduler or from cached task metadata.
-        #: The scheduler fill should occur after all dependencies have completed, but before run(),
-        #: so it is possible to access dependencies in the outputs generator. Analysis tasks should be able
-        #: to resolve exec tasks outputs from metadata. This would remove the necessity for instantiating tasks
-        #: to reference outputs and removes limitations for dynamic output descriptor generation.
+        #: This currently caches the results from output_map().
+        #: Ideally, however, this should be filled either by the scheduler or
+        #: from cached task metadata.
+        #: The scheduler fill should occur after all dependencies have completed,
+        #: but before run(), so it is possible to access dependencies in the
+        #: outputs generator. Analysis tasks should be able to resolve exec
+        #: tasks outputs from metadata. This would remove the necessity for
+        #: instantiating tasks to reference outputs and removes limitations for
+        #: dynamic output descriptor generation.
         self.collected_outputs = {}
+
+        # Note: the whole __dict__ may be replaced by Borg, so no property
+        # initialization beyond this point
+        super().__init__()
 
     def __str__(self):
         return str(self.task_id)
@@ -166,16 +210,38 @@ class Task(metaclass=TaskRegistry):
     def __eq__(self, other: "Task"):
         return self.task_id == other.task_id
 
+    @classmethod
+    def is_exec_task(cls):
+        return False
+
+    @classmethod
+    def is_session_task(cls) -> bool:
+        """
+        Helper to determine whether a Task should be treated like a :class:`SessionTask`.
+        """
+        return False
+
+    @classmethod
+    def is_benchmark_task(cls) -> bool:
+        """
+        Helper to determine whether a Task should be treated like a :class:`BenchmarkTask`.
+        """
+        return False
+
     @property
     def session(self):
         raise NotImplementedError("Subclasses should override")
 
     @property
-    def task_id(self) -> typing.Hashable:
+    def task_id(self) -> Hashable:
         """
         Return the unique task identifier.
         """
         raise NotImplementedError("Subclass should override")
+
+    @property
+    def borg_state_id(self) -> Hashable:
+        return self.task_id
 
     @property
     def completed(self) -> bool:
@@ -187,29 +253,19 @@ class Task(metaclass=TaskRegistry):
         return self._completed.is_set()
 
     @property
-    def output_map(self) -> dict[str, Target]:
+    def output_map(self) -> dict[str, "Target"]:
         """
         Return the output descriptors for the task.
         See note on :attr:`Task.collected_outputs`.
         The only invariant that should be enforced here is that the output map is only ever accessed
         after all dependencies tasks have completed.
+        XXX this is not strictly true, it can be accessed after the dependencies generator
+        has been consumed, so that dependencies are known and their side-effects are known.
+        The actual data however will be ready only after the tasks are done.
         """
         if not self.collected_outputs:
             self.collected_outputs = dict(self.outputs())
         return self.collected_outputs
-
-    def add_drone(self, other: "Task"):
-        """
-        Register a 'clone' task for this task.
-        Drone tasks will share the state of the main task, this includes the completed/failed state and any internal state required for the generation of outputs.
-        It is the responsiblity of subclasses to ensure that the proper bits of state
-        are shared.
-        Note that when this happens it is critical that there are no threads waiting
-        on the task.completed event, otherwise they will never be notified.
-        """
-        assert self.task_id == other.task_id
-        assert type(self) == type(other)
-        other.__dict__ = self.__dict__
 
     def wait(self):
         """
@@ -231,7 +287,7 @@ class Task(metaclass=TaskRegistry):
         self.failed = ex
         self._completed.set()
 
-    def resources(self) -> typing.Iterable["ResourceManager.ResourceRequest"]:
+    def resources(self) -> Iterable["ResourceManager.ResourceRequest"]:
         """
         Produce a set of resources that are consumed by this task.
         Once the resources are available, they will be reserved and
@@ -240,31 +296,140 @@ class Task(metaclass=TaskRegistry):
         """
         yield from []
 
-    def dependencies(self) -> typing.Iterable["Task"]:
+    def dependencies(self) -> Iterable["Task"]:
         """
         Produce the set of :class:`Task` objects that this task depends upon.
 
         :return: sequence of dependencies
         """
-        yield from []
+        for attr in self._deps_registry:
+            deps = getattr(self, attr)
+            if not isinstance(deps, Iterable):
+                deps = [deps]
+            yield from filter(lambda d: d is not None, deps)
 
-    def outputs(self) -> typing.Iterable[tuple[str, Target]]:
+    def outputs(self) -> Iterable[tuple[str, "Target"]]:
         """
-        Produce the set of :class:`Target` objects that describe the outputs that are produced
-        by this task.
-        Each target must be associated to a unique name. The name is considered to be the public
-        interface for other tasks to fetch targets and outputs of this task.
-        The name/target pairs may be used to construct a dictionary to access the return values by key.
+        Produce the set of :class:`Target` objects that describe the outputs
+        that are produced by this task.
+        Each target must be associated to a unique name.
+        The name is considered to be the public interface for other tasks to
+        fetch targets and outputs of this task.
+        The name/target pairs may be used to construct a dictionary to access
+        the return values by key.
 
-        Note that this method generates output descriptors, not output data. The descriptors may be dynamic but
-        must be determined independently of :meth:`Task.run`. This allows to use cached outputs in the future, and
-        avoid calling :meth:`Task.run` altogether. The :meth:`Task.run` is responsible for producing the output
-        data and setting it to the output_map, if needed.
+        Note that this method generates output descriptors, not output data.
+        The descriptors may be dynamic but must be determined independently of
+        :meth:`Task.run`. This allows to use cached outputs in the future, and
+        avoid calling :meth:`Task.run` altogether. The :meth:`Task.run` is
+        responsible for producing the output data and setting it to the
+        output_map, if needed.
         """
-        yield from []
+        registered = {key: getattr(self, attr) for key, attr in self._output_registry.items()}
+        yield from registered.items()
 
     def run(self):
         raise NotImplementedError("Task.run() must be overridden")
+
+
+class dependency:
+    """
+    Decorator for :class:`Task` dependencies.
+    Provides a shorthand to declare dependencies of a task.
+    Note that this behaves as a property field.
+    This should be used in place of the :meth:`Task.dependencies()` and
+    :attr:`Task.resolved_dependencies` if there are no special requirements.
+
+    Note that dependencies are Borgs, so there is a shared state for all tasks
+    with the same ID, regardless of how many times the dependency property
+    is accessed, therefore there is no need to cache here a single instance.
+    """
+    def __init__(self, fn: Callable | None = None, optional: bool = False):
+        self._fn = fn
+        self._optional = optional
+        self._dependency_name = None
+
+    def __set_name__(self, owner, name):
+        """
+        Register this descriptor as a dependency generator of this :class:`Task`
+        """
+        assert issubclass(owner, Task), ("@dependency decorator may be used "
+                                         "only within Task classes")
+        owner.register_dependency(name)
+        self._dependency_name = name
+
+    def __get__(self, instance, owner=None):
+        assert instance is not None
+        assert self._fn is not None
+        try:
+            result = self._fn(instance)
+            # Normalize any generator or iterable to a list, keep single value unchanged
+            if isinstance(result, Iterable) and not isinstance(result, list):
+                return list(result)
+        except TaskNotFound:
+            result = None
+
+        if not self._optional and not result:
+            instance.logger.error("Missing required dependency %s", self._dependency_name)
+            raise MissingDependency(f"Failed to resolve dependency")
+        return result
+
+    def __call__(self, fn):
+        """
+        Invoked when the decorator is called with arguments.
+        Just return the descriptor with the correct arguments.
+        """
+        return dependency(fn=fn, optional=self._optional)
+
+
+class output:
+    """
+    Decorator for :class:`Task` output artefacts.
+    Provides a shorthand to declare outputs of a task.
+    Note that this behaves as a property field.
+    This should be used in place of the :meth:`Task.outputs()` and
+    :attr:`Task.output_map` if there are no special requirements.
+
+    This decorator acts as a property decorator.
+    There is only one instance for each task output target, which is held here,
+    further references to it may be obtained from the :class:`Task` class for
+    convenience.
+    """
+    def __init__(self, fn: Callable | None = None, name: str | None = None):
+        """
+        :param name: Override the name of the output, the name of the decorated
+        function is used otherwise.
+        """
+        self._fn = fn
+        self._key = name
+
+    def __set_name__(self, owner, name):
+        """
+        Register this descriptor as an output of this :class:`Task`
+        """
+        assert issubclass(owner, Task), ("@output decorator may be used only "
+                                         "within Task classes")
+        assert self._fn is not None
+        if self._key is None:
+            self._key = name
+        owner.register_output(TargetRef(self._key, name))
+
+    def __get__(self, instance, owner=None):
+        assert instance is not None
+        assert self._fn is not None
+        result = self._fn(instance)
+
+        # Normalize generators and iterables to a list
+        if isinstance(result, Iterable) and not isinstance(result, list):
+            result = list(result)
+        return result
+
+    def __call__(self, fn):
+        """
+        Invoked when the decorator is called with arguments.
+        Just return the descriptor with the correct arguments.
+        """
+        return output(fn=fn, name=self._key)
 
 
 class SessionTask(Task):
@@ -274,10 +439,16 @@ class SessionTask(Task):
     These tasks do not reference a specific benchmark ID or benchmark group ID.
     """
     def __init__(self, session: "Session", task_config: Config = None):
-        super().__init__(task_config=task_config)
         self._session = session
         #: Task logger is a child of the session logger
         self.logger = new_logger(f"{self.task_name}", parent=session.logger)
+
+        # Borg initialization occurs here
+        super().__init__(task_config=task_config)
+
+    @classmethod
+    def is_session_task(cls):
+        return True
 
     @property
     def session(self):
@@ -295,11 +466,17 @@ class BenchmarkTask(Task):
     These tasks do not reference a specific benchmark ID or benchmark group ID.
     """
     def __init__(self, benchmark: "Benchmark", task_config: Config = None):
-        super().__init__(task_config=task_config)
         #: Associated benchmark context
         self.benchmark = benchmark
         #: Task logger is a child of the benchmark logger
         self.logger = new_logger(f"{self.task_name}", parent=self.benchmark.logger)
+
+        # Borg initialization occurs here
+        super().__init__(task_config=task_config)
+
+    @classmethod
+    def is_benchmark_task(cls):
+        return True
 
     @property
     def session(self):
@@ -345,6 +522,10 @@ class ExecutionTask(BenchmarkTask):
         #: Script builder associated to the current benchmark context.
         self.script = script
 
+    @classmethod
+    def is_exec_task(cls):
+        return True
+
     @property
     def uuid(self):
         return self.benchmark.uuid
@@ -360,6 +541,10 @@ class SessionExecutionTask(SessionTask):
     This can be used for data generation that is independent from the benchmark
     configurations.
     """
+    @classmethod
+    def is_exec_task(cls):
+        return True
+
     @property
     def uuid(self):
         raise TypeError("Task.uuid is invalid on SessionExecutionTask")
@@ -387,207 +572,6 @@ class SessionDataGenTask(SessionExecutionTask):
     require_instance = False
 
 
-class AnalysisTask(SessionTask):
-    """
-    Analysis tasks that perform anythin from plotting to data checks and transformations.
-    This is the base class for all public analysis steps that are allocated by the session.
-    Analysis tasks are not necessarily associated to a single benchmark. In general they reference the
-    current session and analysis configuration, subclasses may be associated to a benchmark context.
-
-    Note that this currently assumes that tasks with the same name are not issued
-    more than once for each benchmark run UUID. If this is violated, we need to
-    change the task ID generation.
-    """
-
-    task_namespace = "analysis"
-
-    def __init__(
-        self,
-        session: "Session",
-        analysis_config: AnalysisConfig,
-        task_config: Config = None,
-    ):
-        super().__init__(session, task_config=task_config)
-        #: Analysis configuration for this invocation
-        self.analysis_config = analysis_config
-
-
-class DataFrameTarget(Target):
-    """
-    Target wrapping an output dataframe from a task.
-    """
-    def __init__(self, schema: pa.DataFrameSchema):
-        self.schema = schema
-        self._df = None
-
-    def assign(self, df: pd.DataFrame):
-        self._df = self.schema.validate(df)
-
-    def get(self) -> pd.DataFrame:
-        return self._df.copy()
-
-
-class FileTarget(Target):
-    """
-    Base class for a target output file.
-
-    The factory methods should be used to generate paths for the file targets.
-    """
-    @classmethod
-    def from_task(cls, task: SessionTask | BenchmarkTask, prefix: str = None, ext: str = None, **kwargs) -> "Self":
-        """
-        Create a task path using the task identifier and the parent session data root path.
-
-        :param task: The task that generates this file
-        :param prefix: Additional name used to generate the filename, in case the task generates
-        multiple files
-        :param ext: Optional file extension
-        :param `**kwargs`: Forwarded arguments to the :class:`FileTarget` constructor.
-        :returns: The file target
-        """
-        name = re.sub(r"\.", "-", task.task_id)
-        if prefix:
-            name = f"{prefix}-{name}"
-        path = Path(name)
-
-        if ext:
-            if not ext.startswith("."):
-                ext = "." + ext
-            path = path.with_suffix(ext)
-
-        if isinstance(task, SessionTask):
-            return cls.from_session(task.session, path, **kwargs)
-        elif isinstance(task, BenchmarkTask):
-            return cls.from_benchmark(task.benchmark, path, **kwargs)
-        else:
-            raise TypeError(f"Invalid task type {task.__class__}")
-
-    @classmethod
-    def from_session(cls, session: "Session", path: Path) -> "Self":
-        """
-        Build a file target descriptor from a session.
-
-        The descriptor will point to a single file in the session data root path.
-        :param session: The target session
-        :param path: The target file name
-        :returns: The file target
-        """
-        raise NotImplementedError("Must override")
-
-    @classmethod
-    def from_benchmark(cls, benchmark: "Benchmark", path: Path, use_iterations: bool = False) -> "Self":
-        """
-        Build a file target descriptor for a benchmark.
-
-        The descriptor will point to one or more files in the benchmark data root.
-        If the iterations parameter is set, the descriptor will map to multiple files,
-        one for each benchmark iteration.
-        :param benchmark: The target benchmark
-        :param path: The target file name
-        :param use_iterations: Generate multiple files, one per iteration.
-        :returns: The file target
-        """
-        raise NotImplementedError("Must override")
-
-    def __init__(self, paths: list[Path], remote_paths: list[Path] | None = None, use_iterations: bool = False):
-        self._paths = paths
-        self._remote_paths = remote_paths
-        self.use_iterations = use_iterations
-
-    @property
-    def path(self) -> Path:
-        """
-        Shorthand to return the path for targets that do not depend on iterations.
-        If the path depends on the iteration index, and there are multiple paths available, this raises a TypeError.
-        """
-        if len(self._paths) > 1:
-            raise ValueError("Can not use shorthand path property when multiple paths are present")
-        return self._paths[0]
-
-    @property
-    def paths(self) -> list[Path]:
-        return list(self._paths)
-
-    @property
-    def remote_path(self) -> Path:
-        """
-        Shorthand to return the path for targets that do not depend on iterations.
-        If the path depends on the iteration index, this raises a TypeError.
-        """
-        if len(self._paths) > 1:
-            raise ValueError("Can not use shorthand remote_path property when multiple paths are present")
-        return self.remote_paths[0]
-
-    @property
-    def remote_paths(self) -> list[Path]:
-        """
-        Same as path but all paths are coverted rebased to the guest data output directory
-        """
-        assert self.needs_extraction(), "Can not use remote paths if file does not need extraction"
-        return list(self._remote_paths)
-
-    def is_file(self):
-        return True
-
-    def needs_extraction(self):
-        raise NotImplementedError("Must override")
-
-
-class DataFileTarget(FileTarget):
-    """
-    A target output file that is generated on the guest and needs to be extracted.
-    """
-    @classmethod
-    def from_session(cls, session: "Session", path: Path) -> FileTarget:
-        raise TypeError("DataFileTarget does not support session-wide scope, only benchmark scope")
-
-    @classmethod
-    def from_benchmark(cls, benchmark: "Benchmark", path: Path, use_iterations: bool = False) -> FileTarget:
-        benchmark_data_root = benchmark.get_benchmark_data_path()
-        guest_data_root = benchmark.config.remote_output_dir
-        if use_iterations:
-            base_paths = map(benchmark.get_benchmark_iter_data_path, range(benchmark.config.iterations))
-            local = [base / path for base in base_paths]
-            remote = [guest_data_root / p.relative_to(benchmark_data_root) for p in local]
-        else:
-            local = [benchmark_data_root / path]
-            remote = [guest_data_root / path]
-        return cls(local, remote, use_iterations=use_iterations)
-
-    def needs_extraction(self):
-        return True
-
-
-class LocalFileTarget(FileTarget):
-    """
-    A target output file that is generated on the host and does not need to be extracted
-    """
-    @classmethod
-    def from_session(cls, session: "Session", path: Path) -> FileTarget:
-        return cls([session.get_data_root_path() / path])
-
-    @classmethod
-    def from_benchmark(cls, benchmark: "Benchmark", path: Path, use_iterations: bool = False) -> FileTarget:
-        benchmark_data_root = benchmark.get_benchmark_data_path()
-        if use_iterations:
-            base_paths = map(benchmark.get_benchmark_iter_data_path, range(benchmark.config.iterations))
-            local = [base / path for base in base_paths]
-        else:
-            local = [benchmark_data_root / path]
-        return cls(local)
-
-    def needs_extraction(self):
-        return False
-
-
-class PlotTarget(Target):
-    """
-    Target pointing to a plot path
-    """
-    def __init__(self, path):
-        self.path = path
-
-
 class ResourceManager:
     """
     Base class to abstract resource limits on tasks.
@@ -607,9 +591,9 @@ class ResourceManager:
         """
 
         name: str
-        pool: typing.Hashable | None
-        acquire_args: dict[str, typing.Any]
-        _resource: typing.Any = dc.field(init=False, default=None)
+        pool: Hashable | None
+        acquire_args: dict[str, Any]
+        _resource: Any = dc.field(init=False, default=None)
 
         def __lt__(self, other):
             return self.name < other.name
@@ -639,7 +623,7 @@ class ResourceManager:
             return self._resource
 
     @classmethod
-    def request(cls, pool: typing.Hashable = None, **kwargs) -> ResourceRequest:
+    def request(cls, pool: Hashable = None, **kwargs) -> ResourceRequest:
         assert cls.resource_name is not None, f"{cls} is missing resource name?"
         return cls.ResourceRequest(cls.resource_name, pool, kwargs)
 
@@ -661,7 +645,7 @@ class ResourceManager:
     def __str__(self):
         return f"{self.__class__.__name__}[{self.resource_name}]"
 
-    def _acquire(self, pool: typing.Hashable):
+    def _acquire(self, pool: Hashable):
         """
         Reserve an item slot in the underlying resource pool
         """
@@ -669,7 +653,7 @@ class ResourceManager:
             return
         self._limit_guard.acquire()
 
-    def _release(self, pool: typing.Hashable):
+    def _release(self, pool: Hashable):
         """
         Release an item slot to the underlying resource pool
         """
@@ -677,13 +661,13 @@ class ResourceManager:
             return
         self._limit_guard.release()
 
-    def _get_resource(self, req: ResourceRequest) -> typing.Any:
+    def _get_resource(self, req: ResourceRequest) -> Any:
         """
         Produce a resource item after a slot is acquired.
         """
         raise NotImplementedError("Must override")
 
-    def _put_resource(self, r: typing.Any, req: ResourceRequest):
+    def _put_resource(self, r: Any, req: ResourceRequest):
         """
         Return a resource item to the manager after the client is done with it
         """
@@ -694,7 +678,7 @@ class ResourceManager:
         return self.limit is None or self.limit == 0
 
     @contextmanager
-    def acquire(self, req: ResourceRequest) -> typing.ContextManager[typing.Any]:
+    def acquire(self, req: ResourceRequest) -> ContextManager[Any]:
         """
         Acquire a resource, optionally specifying an internal pool that
         may be used to improve allocation.
@@ -780,7 +764,7 @@ class TaskScheduler:
         #: task completion barrier
         self._pending_tasks_cv = Condition()
         #: number of worker threads to run
-        self.num_workers = session.config.concurrent_workers or (mp.cpu_count() * 5)
+        self.num_workers = session.config.concurrent_workers or mp.cpu_count()
         #: resource managers
         self._rman = {}
 
@@ -925,7 +909,6 @@ class TaskScheduler:
             # Assume that we can not have tasks with duplicate IDs
             # If a task is already scheduled just skip this, duplicate
             # dependencies are allowed.
-            self._task_graph.nodes[task.task_id]["task"].add_drone(task)
             return
         self._task_graph.add_node(task.task_id, task=task)
         for dep in task.dependencies():
@@ -945,10 +928,8 @@ class TaskScheduler:
                 )
             else:
                 sched = nx.topological_sort(self._task_graph)
-            run_sched = [
-                self._task_graph.nodes[t]["task"] for t in reversed(list(sched))
-            ]
-            self.logger.debug("Resolved benchmark schedule %s", run_sched)
+            run_sched = [self._task_graph.nodes[t]["task"] for t in reversed(list(sched))]
+            self.logger.debug("Resolved benchmark schedule:\n%s", "\n".join(map(str, run_sched)))
             return run_sched
         except nx.NetworkXUnfeasible:
             for cycle in nx.simple_cycles(self._task_graph):

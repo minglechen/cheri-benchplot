@@ -4,15 +4,16 @@ from pathlib import Path
 
 from marshmallow.validate import OneOf
 
-from ..core.config import ConfigPath, ProfileConfig, TemplateConfig
-from ..core.task import DataFileTarget, ExecutionTask
+from ..core.artefact import DataFileTarget
+from ..core.config import Config, ConfigPath, ProfileConfig
+from ..core.task import ExecutionTask
 from ..qemu.task import QEMUTracingSetupTask
 
 
 @dataclass
-class NetperfRunConfig(TemplateConfig):
+class NetperfRunConfig(Config):
     #: Path to netperf/netserver in the guest
-    netperf_path: ConfigPath = Path("opt/{cheri_target}/netperf/bin")
+    netperf_path: ConfigPath = Path("opt/{instance.cheri_target}/netperf/bin")
 
     #: Actual benchmark options
     netperf_options: typing.List[str] = field(default_factory=list)
@@ -41,11 +42,11 @@ class NetperfExecTask(ExecutionTask):
         self.logger.debug("Using %s %s", self.netperf_bin, self.netserver_bin)
 
     def get_stats_target(self):
-        return DataFileTarget.from_task(self, use_iterations=True, ext="csv")
+        return DataFileTarget(self, use_iterations=True, ext="csv")
 
     def get_hwpmc_target(self) -> Path:
         """The remote profiling output target"""
-        return DataFileTarget.from_task(self, prefix="hwpmc", use_iterations=True, ext="csv")
+        return DataFileTarget(self, prefix="hwpmc", use_iterations=True, ext="csv")
 
     def dependencies(self):
         if self.config.profile.qemu_trace:
@@ -71,10 +72,10 @@ class NetperfExecTask(ExecutionTask):
         for i in range(self.benchmark.config.iterations):
             iteration_arguments = []
             if self.config.profile.hwpmc_trace:
-                iteration_arguments += ["-G", self.get_hwpmc_target().remote_paths[i]]
+                iteration_arguments += ["-G", self.get_hwpmc_target().remote_paths()[i]]
             full_options = self.config.netperf_options + extra_arguments + iteration_arguments
             s = self.script.benchmark_sections[i]["benchmark"]
-            s.add_cmd(self.netperf_bin, full_options, env=run_env, output=self.get_stats_target().remote_paths[i])
+            s.add_cmd(self.netperf_bin, full_options, env=run_env, output=self.get_stats_target().remote_paths()[i])
 
         s = self.script.sections["post-benchmark"]
         s.add_kill_cmd(netserver)

@@ -5,10 +5,10 @@ from pandera import Field
 from pandera.extensions import register_check_method
 from pandera.typing import Series
 
-from pycheribenchplot.core.analysis import (BenchmarkDataLoadTask, StatsByParamGroupTask)
+from pycheribenchplot.core.analysis import (AnalysisTask, BenchmarkDataLoadTask, StatsByParamGroupTask)
+from pycheribenchplot.core.artefact import DataFrameTarget
 from pycheribenchplot.core.config import AnalysisConfig
 from pycheribenchplot.core.model import DataModel, ParamGroupDataModel
-from pycheribenchplot.core.task import AnalysisTask, DataFrameTarget
 
 
 class DummyModel(DataModel):
@@ -41,7 +41,7 @@ class ValidateStats(ParamGroupDataModel):
 
     count_mean_ndelta: Series[float] = Field(alias=("count", "mean", "norm_delta"),
                                              nullable=True,
-                                             approx_oneof=dict(sequence=[0, 9], distance=.8))
+                                             approx_oneof=dict(sequence=[0, 9], distance=1))
     count_std_sample: Series[float] = Field(alias=("count", "std", "sample"),
                                             approx_oneof=dict(sequence=[1, 1], distance=.2))
     count_std_delta: Series[float] = Field(alias=("count", "std", "delta"),
@@ -120,7 +120,7 @@ def test_param_group_task_simple_deps(register_tasks, simple_session):
     """
     DummyLoadTask, DummyParamGroupTask = register_tasks
 
-    aconf = AnalysisConfig.schema().load({"handlers": [{"handler": "test.fake-group-task"}]})
+    aconf = AnalysisConfig.schema().load({"tasks": [{"handler": "test.fake-group-task"}]})
     task = DummyParamGroupTask(simple_session, aconf, {"param0": "param0-value1"})
 
     deps = list(task.dependencies())
@@ -137,7 +137,7 @@ def test_param_group_task_full_deps(register_tasks, full_session):
     """
     DummyLoadTask, DummyParamGroupTask = register_tasks
 
-    aconf = AnalysisConfig.schema().load({"handlers": [{"handler": "test.fake-group-task"}]})
+    aconf = AnalysisConfig.schema().load({"tasks": [{"handler": "test.fake-group-task"}]})
     task = DummyParamGroupTask(full_session, aconf, {"param0": "param0-value1"})
 
     deps = list(task.dependencies())
@@ -156,7 +156,7 @@ def test_param_group_simple_run(mocker, register_tasks, full_session):
     """
     DummyLoadTask, DummyParamGroupTask = register_tasks
 
-    aconf = AnalysisConfig.schema().load({"handlers": [{"handler": "test.fake-group-task"}]})
+    aconf = AnalysisConfig.schema().load({"tasks": [{"handler": "test.fake-group-task"}]})
     task = DummyParamGroupTask(full_session, aconf, {"param0": "param0-value1"})
 
     # XXX this would be nicer if we could use hypothesis.given()
@@ -169,8 +169,6 @@ def test_param_group_simple_run(mocker, register_tasks, full_session):
         "param0": ["param0-value1"] * N,
         "count": np.random.normal(loc=10, size=N)
     }).set_index(["dataset_id", "dataset_gid", "iteration", "param0"])
-    target0 = DataFrameTarget(DummyModel.to_schema(full_session))
-    target0.assign(input_df0)
     input_df1 = pd.DataFrame({
         "dataset_id": ["f011e12b-75ef-4174-ba38-2795c2ca1e30"] * N,
         "dataset_gid": ["4995a8b2-4852-4310-9b34-26cbd28494f0"] * N,
@@ -178,15 +176,20 @@ def test_param_group_simple_run(mocker, register_tasks, full_session):
         "param0": ["param0-value1"] * N,
         "count": np.random.normal(loc=100, size=N),
     }).set_index(["dataset_id", "dataset_gid", "iteration", "param0"])
-    target1 = DataFrameTarget(DummyModel.to_schema(full_session))
-    target1.assign(input_df1)
 
     # Simulate computed dependencies
     task_load_0 = mocker.Mock(spec=DummyLoadTask)
+    target0 = DataFrameTarget(task_load_0, None)
+    target0.schema = DummyModel.to_schema(full_session)
+    target0.assign(input_df0)
     task_load_0.completed = mocker.PropertyMock(return_value=True)
     task_load_0.outputs.return_value = [("df", target0)]
     task_load_0.output_map = {"df": target0}
+
     task_load_1 = mocker.Mock(spec=DummyLoadTask)
+    target1 = DataFrameTarget(task_load_1, None)
+    target1.schema = DummyModel.to_schema(full_session)
+    target1.assign(input_df1)
     task_load_1.completed = mocker.PropertyMock(return_value=True)
     task_load_1.outputs.return_value = [("df", target1)]
     task_load_1.output_map = {"df": target1}

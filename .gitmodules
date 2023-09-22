@@ -1,0 +1,3 @@
+[submodule "pycheribenchplot/ext/cheri-compressed-cap"]
+	path = pycheribenchplot/ext/cheri-compressed-cap
+	url = https://github.com/CTSRD-CHERI/cheri-compressed-cap

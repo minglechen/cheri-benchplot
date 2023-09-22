@@ -1,36 +1,30 @@
 import logging
 import re
 import shutil
-import typing
 from collections import defaultdict, namedtuple
 from contextlib import AbstractContextManager
 from dataclasses import asdict, fields
 from enum import Enum
 from pathlib import Path
+from typing import Type
 from uuid import UUID
 
 import pandas as pd
+from marshmallow.exceptions import ValidationError
+from tabulate import tabulate
+from typing_extensions import Self
 
+from .analysis import AnalysisTask
 from .benchmark import Benchmark, BenchmarkExecMode, ExecTaskConfig
-from .config import (
-    AnalysisConfig,
-    BenchplotUserConfig,
-    Config,
-    ExecTargetConfig,
-    PipelineConfig,
-    SessionRunConfig,
-    TaskTargetConfig,
-    TemplateConfigContext,
-)
+from .config import (AnalysisConfig, BenchplotUserConfig, Config, ConfigContext, ExecTargetConfig, PipelineConfig,
+                     SessionRunConfig, TaskTargetConfig)
 from .instance import InstanceManager
-from .model import UUIDType
-from .task import AnalysisTask, TaskRegistry, TaskScheduler
+from .model import UNPARAMETERIZED_INDEX_NAME
+from .task import (ExecutionTask, SessionExecutionTask, TaskRegistry, TaskScheduler)
 from .util import new_logger
 
 #: Constant name of the generated session configuration file
 SESSION_RUN_FILE = "session-run.json"
-#: Constant name to mark the benchmark matrix index as unparameterized
-UNPARAMETERIZED_INDEX_NAME = "RESERVED__unparameterized_index"
 benchplot_logger = logging.getLogger("cheri-benchplot")
 
 
@@ -46,12 +40,7 @@ class Session:
     """
 
     @classmethod
-    def make_new(
-        cls,
-        user_config: BenchplotUserConfig,
-        config: PipelineConfig,
-        session_path: Path,
-    ) -> "Session":
+    def make_new(cls, user_config: BenchplotUserConfig, config: PipelineConfig, session_path: Path) -> Self:
         """
         Create a new session and initialize the directory hierarchy
 
@@ -61,9 +50,7 @@ class Session:
         :return: A new session instance
         """
         if session_path.exists():
-            benchplot_logger.logger.error(
-                "Session directory already exists for session %s", session_path
-            )
+            benchplot_logger.error("Session directory already exists for session %s", session_path)
             raise ValueError("New session path already exists")
         run_config = SessionRunConfig.generate(user_config, config)
         run_config.name = session_path.name
@@ -86,9 +73,7 @@ class Session:
         return False
 
     @classmethod
-    def from_path(
-        cls, user_config: BenchplotUserConfig, path: Path
-    ) -> typing.Optional["Session"]:
+    def from_path(cls, user_config: BenchplotUserConfig, path: Path) -> Self | None:
         """
         Load a session from the given path.
 
@@ -130,6 +115,8 @@ class Session:
         #: Session root path, where all the session data will be stored
         self.session_root_path = session_root_path.expanduser().absolute()
         self._ensure_dir_tree()
+        #: Mapping from g_uuid to platform configurations. Note that this should be readonly.
+        self.platform_map = {}
         #: A dataframe that organises the set of benchmarks to run or analyse.
         self.benchmark_matrix = self._resolve_benchmark_matrix()
         #: Benchmark baseline instance group UUID.
@@ -149,68 +136,20 @@ class Session:
     def __str__(self):
         return f"Session({self.uuid}) [{self.name}]"
 
-    def _resolve_exec_task_options(
-        self, config: ExecTargetConfig
-    ) -> typing.Optional[Config]:
-        """
-        Resolve the configuration type for a :class:`ExecTargetConfig` containing run options.
-
-        :param config: A single dataset configuration
-        :return: A Config object to be used as the new :attr:`ExecTargetConfig.task_options`.
-        If the exec task does not specify a task_config_class, return a dict with the same content as
-        the original run_options dict.
-        """
-        # Existence of the exec task is ensured by configuration validation
-        exec_task = TaskRegistry.resolve_exec_task(config.handler)
-        if exec_task.task_config_class:
-            return exec_task.task_config_class.schema().load(config.task_options)
-        return config.task_options
-
     def _resolve_config_template(self, config: SessionRunConfig) -> SessionRunConfig:
         """
         Resolves the templates for the given session run configuration,
         using the current user configuration.
         """
-        ctx = TemplateConfigContext()
-        ctx.register_template_subst(**asdict(self.user_config))
-        # Register substitutions for known stable fields in the run configuration
-        ctx.register_template_subst(session=config.uuid)
-        ctx.register_template_subst(session_name=config.name)
-        new_config = config.bind(ctx)
-        # Now scan through all the configurations and subsitute per-benchmark/instance fields
-        new_bench_conf = []
-        for bench_conf in new_config.configurations:
-            ctx.register_template_subst(
-                uuid=bench_conf.uuid,
-                g_uuid=bench_conf.g_uuid,
-                iterations=bench_conf.iterations,
-                drop_iterations=bench_conf.drop_iterations,
-                remote_ouptut_dir=bench_conf.remote_output_dir,
-            )
-            ctx.register_template_subst(**bench_conf.parameters)
-            inst_conf = bench_conf.instance
-            ctx.register_template_subst(
-                kernel=inst_conf.kernel,
-                baseline=inst_conf.baseline,
-                platform=inst_conf.platform.value,
-                cheri_target=inst_conf.cheri_target.value,
-                kernelabi=inst_conf.kernelabi.value,
-            )
-            # Resolve run_options for each TaskTargetConfig
-            bench_conf.benchmark.task_options = self._resolve_exec_task_options(
-                bench_conf.benchmark
-            )
-            for aux_conf in bench_conf.aux_tasks:
-                aux_conf.task_options = self._resolve_exec_task_options(aux_conf)
-            new_bench_conf.append(bench_conf.bind(ctx))
-        new_config.configurations = new_bench_conf
-        return new_config
+        ctx = ConfigContext()
+        ctx.add_namespace(self.user_config, "user")
+        return config.bind(ctx)
 
     def _resolve_baseline(self):
         """
         Resolve the baseline benchmark run group ID.
         This is necessary to identify the benchmark run that we compare against
-        (actually the column in the benchmark matrix we compare against).
+        (actually the column in the datarun matrix we compare against).
 
         :return: The baseline group ID.
         """
@@ -230,9 +169,9 @@ class Session:
         )
         return baseline
 
-    def _resolve_benchmark_matrix(self) -> pd.DataFrame:
+    def _resolve_benchmark_matrix(self) -> tuple[pd.DataFrame, UUID]:
         """
-        Generate the benchmark matrix from the benchmark configurations.
+        Generate the datarun matrix from the generators configurations.
         In the resulting dataframe:
          - rows are different parameterizations of the benchmark, indexed by param keys.
          - columns are different instances on which the benchmark is run, indexed by dataset_gid.
@@ -245,6 +184,7 @@ class Session:
         for benchmark_config in self.config.configurations:
             self.logger.debug("Found benchmark run config %s", benchmark_config)
             instances[benchmark_config.g_uuid] = benchmark_config.instance.name
+            self.platform_map[benchmark_config.g_uuid] = benchmark_config.instance
             for k, p in benchmark_config.parameters.items():
                 parameters[k].append(p)
         if parameters:
@@ -277,15 +217,11 @@ class Session:
                 bench_matrix[benchmark_config.g_uuid] = benchmark
             benchmark.get_plot_path().mkdir(exist_ok=True)
 
+        show_matrix = tabulate(bench_matrix, tablefmt="github", headers="keys")
+        self.logger.debug("Benchmark matrix:\n%s", show_matrix)
+
         assert not bench_matrix.isna().any().any(), "Incomplete benchmark matrix"
-        for i, row in bench_matrix.iterrows():
-            if isinstance(i, tuple):
-                i = BenchParams(*i)
-            row_str = [str(bench_ctx) for bench_ctx in row.values]
-            self.logger.debug("Benchmark matrix %s = %s", i, row_str)
-        if bench_matrix.shape[0] * bench_matrix.shape[1] != len(
-            self.config.configurations
-        ):
+        if bench_matrix.shape[0] * bench_matrix.shape[1] != len(self.config.configurations):
             self.logger.error("Malformed benchmark matrix")
             raise RuntimeError("Malformed benchmark matrix")
 
@@ -319,7 +255,7 @@ class Session:
         else:
             return list(names)
 
-    def get_public_tasks(self) -> list[typing.Type[AnalysisTask]]:
+    def get_public_tasks(self) -> list[Type[AnalysisTask]]:
         """
         Return the public tasks available for this session.
 
@@ -327,11 +263,9 @@ class Session:
         """
         namespaces = set()
         for bench_config in self.config.configurations:
-            exec_task = TaskRegistry.resolve_exec_task(bench_config.benchmark.handler)
-            namespaces.add(exec_task.task_namespace)
-            for aux_config in bench_config.aux_tasks:
-                aux_task = TaskRegistry.resolve_exec_task(aux_config.handler)
-                namespaces.add(aux_task.task_namespace)
+            for exec_task_config in bench_config.generators:
+                exec_task = TaskRegistry.resolve_exec_task(exec_task_config.handler)
+                namespaces.add(exec_task.task_namespace)
         # Now group all public tasks from the namespaces
         tasks = []
         for ns in namespaces:
@@ -395,6 +329,15 @@ class Session:
         """
         return self.session_root_path / "assets"
 
+    def all_benchmarks(self) -> list[Benchmark]:
+        """
+        Helper method to iterate over benchmark contexts.
+
+        :return: A list containing all benchmark contexts from the
+        benchmark matrix.
+        """
+        return list(self.benchmark_matrix.to_numpy().ravel())
+
     def clean_all(self):
         """
         Clean all output files, including benchmark data.
@@ -443,7 +386,7 @@ class Session:
         self.scheduler.run()
         self.logger.info("Session %s run finished", self.name)
 
-    def analyse(self, analysis_config: AnalysisConfig):
+    def analyse(self, analysis_config: AnalysisConfig | None):
         """
         Run the session analysis tasks requested.
         The analysis pipeline is slighly different from the execution pipeline.
@@ -454,6 +397,10 @@ class Session:
 
         :param analysis_config: The analysis configuration
         """
+        if analysis_config is None:
+            # Load analysis configuration from the session
+            analysis_config = self.config.analysis_config
+
         # Override the baseline ID if configured
         if (
             analysis_config.baseline_gid is not None
@@ -475,7 +422,7 @@ class Session:
                 self.baseline_g_uuid,
             )
 
-        for task_spec in analysis_config.handlers:
+        for task_spec in analysis_config.tasks:
             resolved = TaskRegistry.resolve_task(task_spec.handler)
             if not resolved:
                 self.logger.error(
@@ -484,18 +431,42 @@ class Session:
                 raise ValueError("Invalid task name")
             for task_klass in resolved:
                 if not issubclass(task_klass, AnalysisTask):
-                    self.logger.warning(
-                        "Analysis process only supports scheduling of AnalysisTasks, skipping %s",
-                        task_klass,
-                    )
-                if task_klass.task_config_class:
-                    options = task_klass.task_config_class.schema().load(
-                        task_spec.task_options
-                    )
+                    self.logger.warning("Analysis process only supports scheduling of AnalysisTasks, skipping %s",
+                                        task_klass)
+                if task_klass.task_config_class and isinstance(task_spec.task_options, dict):
+                    options = task_klass.task_config_class.schema().load(task_spec.task_options)
                 else:
                     options = task_spec.task_options
                 task = task_klass(self, analysis_config, task_config=options)
+                self.logger.debug("Schedule analysis task %s with opts %s", task, options)
                 self.scheduler.add_task(task)
         self.logger.info("Session %s start analysis", self.name)
         self.scheduler.run()
         self.logger.info("Session %s analysis finished", self.name)
+
+    def find_exec_task(self, task_class: Type[SessionExecutionTask]) -> SessionExecutionTask:
+        """
+        Find a session-wide execution task and return a task instance.
+
+        This can be used by analysis tasks to load generator dependencies.
+        """
+        task = self.all_benchmarks()[0].find_exec_task(task_class)
+        if not task.is_session_task() or not task.is_exec_task():
+            self.logger.error("The task %s is not a SessionExecutionTask", task_class)
+            raise TypeError("Invalid task type")
+        return task
+
+    def find_all_exec_tasks(self, task_class: Type[ExecutionTask]) -> list[ExecutionTask]:
+        """
+        Find all execution tasks of a given type and return them as a list.
+
+        This can be used by analysis tasks to load generator dependencies.
+        """
+        tasks = []
+        for bench in self.all_benchmarks():
+            task = bench.find_exec_task(task_class)
+            if not task.is_benchmark_task() or not task.is_exec_task():
+                self.logger.error("The task %s is not an ExecutionTask", task_class)
+                raise TypeError("Invalid task type")
+            tasks.append(task)
+        return tasks

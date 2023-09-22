@@ -3,17 +3,22 @@ import re
 
 import pytest
 
+from pycheribenchplot.core.artefact import DataFileTarget
 from pycheribenchplot.core.shellgen import ScriptBuilder
-from pycheribenchplot.core.task import DataFileTarget
+from pycheribenchplot.core.task import ExecutionTask
 
 
-def test_shellgen_base(fake_simple_benchmark):
+def test_shellgen_base(mock_task_registry, fake_simple_benchmark):
     """
     Check that the script builder generates the correct sequence of commands
     in each section.
     """
+    class FakeExecTask(ExecutionTask):
+        task_namespace = "test-shellgen"
+
     script = ScriptBuilder(fake_simple_benchmark)
-    target = DataFileTarget.from_benchmark(fake_simple_benchmark, "test-file")
+    task = FakeExecTask(fake_simple_benchmark, script)
+    target = DataFileTarget(task, "test-file")
 
     # Check that we generated the correct number of sections
     assert len(script.sections["benchmark"]) == 2  # number of iterations in the fixture config

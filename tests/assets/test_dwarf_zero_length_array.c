@@ -16,7 +16,7 @@ struct foo {
 
 void show(struct foo *fp)
 {
-  printf("Foo %d %d\n", fp->nargs);
+  printf("Foo %d\n", fp->nargs);
 }
 
 int main(int argc, char *argv[])

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<head>
+  <title>Structures with imprecise sub-object bounds</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css"
+        rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65"
+        crossorigin="anonymous">
+  <style>
+    ul.struct-offset-list {
+        list-style-type: none;
+        margin-left: 0;
+        padding-left: 0;
+    }
+
+    .struct-text {
+        font-family: "Source Code Pro", monospace, sans-serif;
+    }
+    .struct-name {
+        padding-left: 1em;
+        padding-right: 1em;
+        font-weight: bold;
+    }
+    .member-type {
+        padding-left: 5px;
+        font-weight: normal;
+    }
+    .member-name {
+        font-weight: bold;
+    }
+    .member-size {
+        font-weight: normal;
+    }
+    .member-imprecise {
+        background: #8f151560;
+    }
+
+    .select-imprecise-group > .member-desc {
+        background: #15158f60;
+    }
+
+    .hover-imprecise-group > .member-desc {
+        background: #158f1560;
+    }
+  </style>
+</head>
+<body>
+  {%- for group_name, descriptions in layout_groups.items() %}
+  <div class="container">
+    <div class="accordion" id="group-{{group_name}}">
+      {%- for layout in descriptions %}
+      <div class="accordion-item">
+        <h1 class="accordion-header" id="{{layout.id}}-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#{{layout.id}}-data"
+                  aria-expanded="false"
+                  aria-controls="{{layout.id}}-data">
+            Layout of <span class="struct-text struct-name">{{ layout.name|e }}</span> @ {{ layout.location|e }} ({{ "%#0x" | format( layout.member_size ) }})
+          </button>
+        </h1>
+        <div id="{{layout.id}}-data" class="accordion-collapse collapse"
+             aria-labelledby="{{layout.id}}-header" data-bs-parent="#group-{{group_name}}">
+          <div class="accordion-body">
+            <div class="d-flex">
+              <!-- Left column with structure offsets -->
+              <div class="p-2">
+                <ul class="struct-offset-list">
+                  {%- for member in layout recursive %}
+                  <li class="struct-text">{{ "%#0x" | format(member.member_offset) }}</li>
+                  {%- if member.has_children %}
+                    {{loop(member)}}
+                  {%- endif %}
+                  {%- endfor %}
+                </ul>
+              </div>
+              <!-- Main column with structure members layout -->
+              <div class="p-2 flex-grow">
+                <ul>
+                  {%- for member in layout recursive %}
+                  <li {% if member.alias_groups %} data-member-alias-groups="{{ member.alias_groups }}" {% endif %}
+                      {% if member.alias_id != None %} data-member-alias-target="{{ member.alias_id }}" {% endif %}>
+                    <div class="member-desc rounded-3 {{ 'member-imprecise' if member.is_imprecise }}">
+                      <span class="struct-text member-type">{{ member.member_type|e }}</span>
+                      <span class="struct-text member-name">{{ member.member_name|e }}</span>
+                      <span class="struct-text member-size">({{ "%#0x" | format(member.member_size) }})</span>
+                    </div>
+                    {%- if member.has_children %}
+                    <ul>{{ loop(member) }}</ul>
+                    {%- endif %}
+                  </li>
+                  {%- endfor %}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    {%- endfor %}
+    </div>
+  </div>
+  {%- endfor %}
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4"
+          crossorigin="anonymous"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll("li[data-member-alias-target]").forEach((item) => {
+            const target_group = item.getAttribute("data-member-alias-target");
+            const top_level_struct = item.closest(".accordion-body");
+            item.addEventListener("mouseover", (event) => {
+                top_level_struct.querySelectorAll("li[data-member-alias-groups]").forEach((target) => {
+                    if (target.getAttribute("data-member-alias-groups").split(",").indexOf(target_group) >= 0) {
+                        target.classList.add("hover-imprecise-group");
+                    }
+                });
+            });
+            item.addEventListener("mouseout", (event) => {
+                top_level_struct.querySelectorAll("li[data-member-alias-groups]").forEach((target) => {
+                    if (target.getAttribute("data-member-alias-groups").split(",").indexOf(target_group) >= 0) {
+                        target.classList.remove("hover-imprecise-group");
+                    }
+                });
+            });
+            item.addEventListener("click", (event) => {
+                top_level_struct.querySelectorAll("li[data-member-alias-groups]").forEach((target) => {
+                    if (target.getAttribute("data-member-alias-groups").split(",").indexOf(target_group) >= 0) {
+                        target.classList.toggle("select-imprecise-group");
+                    }
+                });
+            });
+        });
+    });
+  </script>
+</body>

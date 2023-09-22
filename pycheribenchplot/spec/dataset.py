@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from ..core.config import (ConfigPath, DatasetArtefact, DatasetName, TemplateConfig)
+from ..core.config import Config, ConfigPath, DatasetArtefact, DatasetName
 from ..core.dataset import DataSetContainer
 
 
 @dataclass
-class SpecRunConfig(TemplateConfig):
+class SpecRunConfig(Config):
     #: Path to the Spec2006 suite in the guest
     spec_path: ConfigPath = Path("/opt/spec2006")
 

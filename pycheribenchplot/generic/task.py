@@ -1,8 +1,9 @@
 import shlex
 from dataclasses import dataclass
 
+from pycheribenchplot.core.artefact import DataFileTarget
 from pycheribenchplot.core.config import Config
-from pycheribenchplot.core.task import DataFileTarget, ExecutionTask
+from pycheribenchplot.core.task import ExecutionTask
 
 
 @dataclass

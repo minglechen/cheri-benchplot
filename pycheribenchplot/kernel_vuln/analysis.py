@@ -6,10 +6,11 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.ticker import AutoMinorLocator, LinearLocator
 
-from pycheribenchplot.core.analysis import PlotTask
+from pycheribenchplot.core.analysis import AnalysisTask
+from pycheribenchplot.core.artefact import DataFrameTarget, LocalFileTarget
 from pycheribenchplot.core.config import (Config, ConfigPath, validate_path_exists)
-from pycheribenchplot.core.plot import new_figure
-from pycheribenchplot.core.task import (AnalysisTask, DataFrameTarget, LocalFileTarget, PlotTarget, SessionDataGenTask)
+from pycheribenchplot.core.plot import PlotTarget, PlotTask, new_figure
+from pycheribenchplot.core.task import SessionDataGenTask
 from pycheribenchplot.kernel_vuln.model import (CheriBSDAdvisories, CheriBSDUnmitigated, History, Marker)
 
 
@@ -363,6 +364,6 @@ class CheriBSDAdvisoriesTables(AnalysisTask):
         self._unmitigated_summary()
 
     def outputs(self):
-        yield "mitigation-summary", PlotTarget(self.session.get_plot_root_path() / "security-advisories-summary.csv")
-        yield "unmitigated-summary", PlotTarget(self.session.get_plot_root_path() /
-                                                "unmitigated-advisories-summary.csv")
+        yield "mitigation-summary", PlotTarget([self.session.get_plot_root_path() / "security-advisories-summary.csv"])
+        yield "unmitigated-summary", PlotTarget(
+            [self.session.get_plot_root_path() / "unmitigated-advisories-summary.csv"])

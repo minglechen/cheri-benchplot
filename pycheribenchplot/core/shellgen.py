@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
 
-from .task import Target
+from .artefact import Target
 from .util import new_logger
 
 

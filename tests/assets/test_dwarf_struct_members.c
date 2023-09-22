@@ -10,6 +10,8 @@ typedef struct baz {
   long z;
 } baz_t;
 
+struct forward;
+
 struct foo {
   int a;
   char *b;
@@ -22,6 +24,7 @@ struct foo {
   void (*i)(int, int);
   int (*j)[10];
   baz_t k;
+  struct forward *l;
 };
 
 void show(struct foo *fp)

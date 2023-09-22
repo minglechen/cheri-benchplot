@@ -8,9 +8,7 @@ import matplotlib.ticker as ticker
 import numpy as np
 import pandas as pd
 
-from pycheribenchplot.core.config import AnalysisConfig, Config, TemplateConfig, ConfigPath
-from pycheribenchplot.core.analysis import PlotTask
-from pycheribenchplot.core.task import Target
+from pycheribenchplot.core.config import AnalysisConfig, Config, ConfigPath
 from .analysis import (
     DrCacheSimAnalyseTask,
     DrCacheSimConfig,
@@ -19,10 +17,11 @@ from .analysis import (
     Addr2LineTask,
     Addr2LineConfig,
 )
-
+from pycheribenchplot.core.config import Config
+from pycheribenchplot.core.plot import PlotTask
 
 @dataclass
-class CachePlotConfig(TemplateConfig):
+class CachePlotConfig(Config):
     plot_cache_levels: typing.List[str] = field(default_factory=list)
     benchmark_param_name: str = "variant"
     variant_param_name: str = "spec_variant"
@@ -151,7 +150,7 @@ class CacheSizePlot(PlotTask):
 
 
 @dataclass
-class InstrCountPlotConfig(TemplateConfig):
+class InstrCountPlotConfig(Config):
     drrun_path: ConfigPath = field(default_factory=Path)
     benchmark_param_name: str = "variant"
     variant_param_name: str = "spec_variant"
@@ -340,7 +339,7 @@ class InstrCountPlot(PlotTask):
 
 
 @dataclass
-class StaticInstrCountPlotConfig(TemplateConfig):
+class StaticInstrCountPlotConfig(Config):
     benchmark_param_name: str = "variant"
     variant_param_name: str = "spec_variant"
     #: The group level (e.g. "line" or "symbol")
@@ -432,7 +431,7 @@ class StaticInstrCountPlot(PlotTask):
 
 
 @dataclass
-class FunctionAnalysisPlotConfig(TemplateConfig):
+class FunctionAnalysisPlotConfig(Config):
     drrun_path: ConfigPath = field(default_factory=Path)
     benchmark_param_name: str = "variant"
     variant_param_name: str = "spec_variant"
@@ -537,7 +536,7 @@ class FunctionAnalysisPlot(PlotTask):
             plt.close(fig)
 
 @dataclass
-class CrossComparePlotConfig(TemplateConfig):
+class CrossComparePlotConfig(Config):
     optimized_file: ConfigPath = field(default_factory=Path)
     baseline_file: ConfigPath = field(default_factory=Path)
     output_file: ConfigPath = field(default_factory=Path)

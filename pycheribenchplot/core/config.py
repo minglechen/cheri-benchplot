@@ -1,50 +1,59 @@
-import argparse as ap
 import collections
 import dataclasses as dc
 import functools as ft
 import itertools as it
 import json
 import logging
+import re
 import shutil
 from collections import OrderedDict
 from datetime import date, datetime
 from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set, Type, Union
 from uuid import UUID, uuid4
 
 import marshmallow.fields as mfields
-import numpy as np
+from git import Repo
 from marshmallow import Schema, ValidationError, validates_schema
 from marshmallow.validate import And, OneOf, Predicate
 from marshmallow_dataclass import NewType, class_schema
-from marshmallow_enum import EnumField
-from typing_inspect import get_args, get_origin, is_generic_type
+from typing_extensions import Self
+from typing_inspect import get_args, get_origin, is_generic_type, is_union_type
+
+from .error import ConfigurationError
+
+# Global configuration logger
+# We do not drag around a custom logger during configuration
+logger = logging.getLogger("cheri-benchplot")
 
 
-def _template_safe(temp: str, **kwargs):
-    try:
-        return temp.format(**kwargs)
-    except KeyError:
-        return temp
-
-
-def lazy_nested_config_field():
+def resolve_task_options(task_spec: str, task_options: dict, is_exec: bool = False) -> Type["Task"]:
     """
-    Create a field marked as lazily-resolved configuration type.
-    This is used for parts of configuration objects that have a configuration type
-    assigned at runtime from a Task.
-    This prevents the data from being modified when binding template values.
+    Helper to lazily coerce task options to the correct type.
     """
-    # Note that we need to levels of metadata: the first is for the dataclass field
-    # that is picked up by marshmallow_dataclass, the second is the keyword argument
-    # 'metadata' passed to the underlying marshmallow field constructor.
-    # return dc.field(default_factory=dict, metadata={"metadata": {"late_config_bind": True}})
-    return dc.field(default_factory=dict, metadata={"late_config_bind": True})
+    # Need to lazily import this to avoid circular dependencies
+    from .task import TaskRegistry
 
-
-def is_lazy_nested_config(f: dc.Field):
-    return f.metadata.get("late_config_bind", False)
+    if is_exec:
+        task_class = TaskRegistry.resolve_exec_task(task_spec)
+        if not task_class:
+            raise ConfigurationError(f"Invalid task spec: {task_spec}")
+    else:
+        matches = TaskRegistry.resolve_task(task_spec)
+        if not matches:
+            raise ConfigurationError(f"Invalid task spec: {task_spec}")
+        if len(matches) > 1:
+            raise ConfigurationError(f"Task handler should be unique: {task_spec}")
+        task_class = matches[0]
+    if task_class.task_config_class:
+        conf_class = task_class.task_config_class
+        try:
+            return conf_class.schema().load(task_options)
+        except ValidationError as err:
+            logger.error("Invalid task options, %s validation failed: %s", conf_class, err.normalized_messages())
+            raise err
+    return task_options
 
 
 class PathField(mfields.Field):
@@ -87,12 +96,11 @@ class TaskSpecField(mfields.Field):
 
     def _validate_taskspec(self, value):
         from .task import TaskRegistry
-
-        task = TaskRegistry.resolve_task(value)
-        if not task:
-            raise ValidationError(
-                f"Task specifier {value} does not name any public tasks"
-            )
+        matches = TaskRegistry.resolve_task(value)
+        if not matches:
+            raise ValidationError(f"Task specifier {value} does not name any public tasks")
+        if len(matches) > 1:
+            raise ValidationError(f"Task specifier {value} must identify an unique task")
 
     def _deserialize(self, value, attr, data, **kwargs):
         value = str(value)
@@ -112,12 +120,31 @@ class ExecTaskSpecField(TaskSpecField):
 
     def _validate_taskspec(self, value):
         from .task import TaskRegistry
+        matches = TaskRegistry.resolve_exec_task(value)
+        if not matches:
+            raise ValidationError(f"Task specifier {value} does not name any public tasks")
 
-        task = TaskRegistry.resolve_exec_task(value)
-        if not task:
-            raise ValidationError(
-                f"Task specifier {value} does not name any public tasks"
-            )
+
+class LazyNestedConfigField(mfields.Field):
+    """
+    Field used to mark lazily-resolved nested configurations.
+
+    This is used for task-dependent configuration types that are not known statically.
+    This fields treats its data as a dictionary, however, upon serialization, it accepts
+    an arbitrary dataclass that is converted to a dict.
+    Note that this automatically defaults to an empty dictionary.
+    """
+    def _serialize(self, value, attr, obj, **kwargs):
+        if value is None:
+            return {}
+        if dc.is_dataclass(value) and isinstance(value, Config):
+            return type(value).schema().dump(value)
+        return value
+
+    def _deserialize(self, value, attr, data, **kwargs):
+        if value is None:
+            return {}
+        return value
 
 
 # Helper type for dataclasses to use the PathField
@@ -125,15 +152,105 @@ ConfigTaskSpec = NewType("ConfigTaskSpec", str, field=TaskSpecField)
 ConfigExecTaskSpec = NewType("ConfigExecTaskSpec", str, field=ExecTaskSpecField)
 ConfigPath = NewType("ConfigPath", Path, field=PathField)
 ConfigAny = NewType("ConfigAny", any, field=mfields.Raw)
+LazyNestedConfig = NewType("LazyNestedConfig", dict[str, any], field=LazyNestedConfigField)
+
+
+class ConfigContext:
+    """
+    Base class for context that can be used to bind Config to.
+
+    The context describes the mapping between keys and values.
+    The substitution occurs in two steps:
+    1. lookup the key in the static parameters
+    2. search for any namespace matching the first part of a hierarchical key
+       and recursively resolve the following parts of a dotted name.
+
+    The "None" namespace is considered the default namespace in which to look up
+    substitution keys.
+    """
+    def __init__(self):
+        self._template_params = {}
+        self._namespaces = {}
+        self._nresolved = 0
+
+    @property
+    def resolved_count(self) -> int:
+        """
+        Return the number of keys that have been resolved.
+
+        This can be used to detect when we are done with recursive
+        resolution.
+        """
+        return self._nresolved
+
+    def add_values(self, **kwargs):
+        """
+        Add one or more static template substitution values.
+
+        :param **kwargs: Key-value pairs for template substitution
+        """
+        self._template_params.update(kwargs)
+
+    def add_namespace(self, config: "Config", name: str | None = None):
+        """
+        Add a source configuration object that is used to look up referenced keys.
+
+        :param config: An existing configuration object, may contain
+            unresolved templates.
+        :param name: Name to use in the template keys to refer to this namespace.
+            For example, if we set name = "user" for :class:`BenchplotUserConfig`, the value for
+            :attr:`BenchplotUserConfig.sdk_path` can be referenced as "{user.sdk_path}".
+        """
+        self._namespaces[name] = config
+
+    def find(self, key: str) -> str | None:
+        """
+        Resolve a dot-separated key to the corresponding substitution value.
+
+        :param key: The key to lookup.
+        :return: The template substitution or None
+        """
+        try:
+            value = self._template_params[key]
+            self._nresolved += 1
+            return value
+        except KeyError:
+            pass
+
+        parts = key.split(".")
+        try:
+            ns = self._namespaces[parts[0]]
+        except KeyError:
+            try:
+                ns = self._namespaces[None]
+            except KeyError:
+                return None
+        for name in parts[1:]:
+            try:
+                ns = getattr(ns, name)
+            except AttributeError:
+                return None
+        if isinstance(ns, Config):
+            return None
+        self._nresolved += 1
+        return str(ns)
 
 
 @dc.dataclass
 class Config:
     """
-    Base class for JSON-based configuration file parsing.
+    XXX merge with the basic config.
+    Base class for configuration data structure that support template substitution.
+    Note that this should be used across the whole hierarchy of nested configurations
+    to have the expected behaviour.
     Each field in this dataclass is deserialized from a json file, with support to
     nested configuration dataclasses.
     Types of the fields are normalized to the type annotation given in the dataclass.
+
+    Note that the substitution process is designed to be incremental.
+    Some template substitutions may become available later during initialization, therefore
+    any unmatched template string will be retained unchanged after a call to
+    :meth:`Config.bind`.
     """
 
     class Meta:
@@ -153,93 +270,111 @@ class Config:
             data = json.load(jsonfile)
         return cls.schema().load(data)
 
-    def emit_json(self) -> str:
-        """
-        Custom logic to emit json.
-        This is required as in older python version pathlib objects are not serializable.
-        """
-        schema = self.schema()
-        return json.dumps(schema.dump(self), indent=4)
-
     def __post_init__(self):
         return
 
+    def _bind_value(self, context: ConfigContext, dtype: Type, value: any) -> any:
+        """
+        Resolve all template keys in this configuration value and produce the substituted value.
 
-class TemplateConfigContext:
-    """
-    Base class for context that can be used to bind TemplateConfig to.
-    """
-
-    def __init__(self):
-        self._template_params = {}
-
-    def register_template_subst(self, **kwargs):
-        for key, value in kwargs.items():
-            self._template_params[key] = value
-
-    def conf_template_params(self):
-        return dict(self._template_params)
-
-
-@dc.dataclass
-class TemplateConfig(Config):
-    def _bind_one(self, context, dtype, value):
+        :param context: The template configuration context
+        :param dtype: Type annotation of the field
+        :param value: Current value of the field. At this point, this is assumed to be
+        a string-like object or a nested configuration.
+        :return: The substituted value
+        """
         if value is None:
-            return value
-        params = context.conf_template_params()
-        if dtype == str:
-            return _template_safe(value, **params)
-        elif dc.is_dataclass(dtype) and issubclass(dtype, TemplateConfig):
-            return value.bind(context)
-        elif dtype == Path or dtype == ConfigPath:
-            str_path = _template_safe(str(value), **params)
-            return Path(str_path)
-        return value
+            return None
+        if dtype == ConfigAny or dtype == any:
+            dtype = type(value)
 
-    def bind_field(self, context, f: dc.Field, value):
+        if dc.is_dataclass(dtype) and issubclass(dtype, Config):
+            return value.bind(context)
+
+        if dtype == str:
+            template = value
+        elif dtype == Path or dtype == ConfigPath:
+            # Path-like object expected here
+            template = str(value)
+            dtype = Path
+        else:
+            # Anything else is assumed to never contain things to bind
+            return value
+
+        # Now we can query the context for substitution keys to resolve.
+        chunks = []
+        last_match = 0
+        for m in re.finditer(r"\{([a-zA-Z0-9_.]+)\}", template):
+            key = m.group(1)
+            subst = context.find(key)
+            if subst is None:
+                continue
+            chunks.append(template[last_match:m.start()])
+            chunks.append(str(subst))
+            last_match = m.end()
+
+        chunks.append(template[last_match:])
+        return dtype("".join(chunks))
+
+    def _bind_field(self, context: ConfigContext, dtype: Type, value: any, metadata: dict | None = None) -> any:
         """
         Run the template substitution on a config field.
-        If the field is a collection or a nested TemplateConfig, we recursively bind
+        If the field is a collection or a nested Config, we recursively bind
         each value.
         """
-        origin = get_origin(f.type)
-        if dc.is_dataclass(f.type):
-            # Forward the nested bind if the dataclass is a TemplateConfig
-            return self._bind_one(context, f.type, value)
-        elif f.type == ConfigPath:
-            return self._bind_one(context, f.type, value)
-        elif is_lazy_nested_config(f):
-            # Signals that the field contains a lazily resolved TemplateConfig, if there is one
-            # recurse the binding, else skip it.
+        if dc.is_dataclass(dtype) and issubclass(dtype, Config):
+            # If it is a nested dataclass, just forward it
+            return value.bind(context)
+        elif dtype == LazyNestedConfig:
+            # If it is a lazy_nested_config field, treat this either as a dataclass or a dict
             if dc.is_dataclass(value):
-                return self._bind_one(context, type(value), value)
-            return value
-        elif origin is Union:
-            args = get_args(f.type)
+                return value.bind(context)
+            else:
+                return self._bind_generic(context, dict, value)
+        elif is_generic_type(dtype) or is_union_type(dtype):
+            # Recurse through the type
+            return self._bind_generic(context, dtype, value)
+        else:
+            # Handle as a single value
+            return self._bind_value(context, dtype, value)
+
+    def _bind_generic(self, context: ConfigContext, dtype: Type, value: any) -> any:
+        """
+        Recursively bind values in generic container types.
+        """
+        origin = get_origin(dtype)
+        if is_union_type(dtype):
+            args = get_args(dtype)
             if len(args) == 2 and args[1] == type(None):
-                # If we have an optional field, bind with the type argument instead
-                return self._bind_one(context, args[0], value)
+                # If we have an optional field, bind with the type argument
+                if value is None:
+                    return value
+                return self._bind_field(context, args[0], value)
             else:
                 # Common union field, use whatever type we have as the argument as we do not
                 # know how to parse it
-                return self._bind_one(context, type(value), value)
-        elif origin is List or origin is list:
-            arg_type = get_args(f.type)[0]
-            return [self._bind_one(context, arg_type, v) for v in value]
-        elif origin is Dict or origin is dict:
-            arg_type = get_args(f.type)[1]
-            return {
-                key: self._bind_one(context, arg_type, v) for key, v in value.items()
-            }
+                return self._bind_field(context, type(value), value)
+        elif type(value) == list:
+            if origin is List or origin is list:
+                inner_type_fn = lambda v: get_args(dtype)[0]
+            else:
+                inner_type_fn = lambda v: type(v)
+            return [self._bind_field(context, inner_type_fn(v), v) for v in value]
+        elif type(value) == dict:
+            if origin is Dict or origin is dict:
+                inner_type_fn = lambda v: get_args(dtype)[1]
+            else:
+                inner_type_fn = lambda v: type(v)
+            return {key: self._bind_field(context, inner_type_fn(v), v) for key, v in value.items()}
         else:
-            return self._bind_one(context, f.type, value)
+            return self._bind_value(context, dtype, value)
 
-    def bind(self, context):
+    def _bind_config(self, source: Self, context: ConfigContext) -> Self:
         """
         Run a template substitution pass with the given substitution context.
         This will resolve template strings as "{foo}" for template key/value
         substitutions that have been registerd in the contexv via
-        TemplateConfigContext.register_template_subst() and leave the missing
+        ConfigContext.register_template_subst() and leave the missing
         template parameters unchanged for later passes.
         """
         changes = {}
@@ -247,14 +382,42 @@ class TemplateConfig(Config):
             if not f.init:
                 continue
             try:
-                replaced = self.bind_field(context, f, getattr(self, f.name))
+                metadata = f.metadata.get("metadata", {})
+                replaced = self._bind_field(context, f.type, getattr(source, f.name), metadata)
             except Exception as ex:
-                raise ValueError(
-                    f"Failed to bind {f.name} with value {getattr(self, f.name)}: {ex}"
-                )
+                raise ConfigurationError(f"Failed to bind {f.name} with value "
+                                         f"{getattr(source, f.name)}: {ex}")
             if replaced:
                 changes[f.name] = replaced
-        return dc.replace(self, **changes)
+        return dc.replace(source, **changes)
+
+    def bind(self, context: ConfigContext) -> Self:
+        """
+        Substitute all templates until there is nothing else that we can substitute.
+
+        :param context: The substitution context
+        :return: A new configuration instance with the substituted values.
+        """
+        bound = self
+        max_steps = 10
+        last_matched = context.resolved_count
+        for _ in range(max_steps):
+            bound = self._bind_config(bound, context)
+            if context.resolved_count == last_matched:
+                break
+            last_matched = context.resolved_count
+        else:
+            raise RuntimeError("LOOP")
+            logger.warning("Configuration template binding exceeded recursion depth limit")
+        return bound
+
+    def emit_json(self) -> str:
+        """
+        Custom logic to emit json.
+        This is required as in older python version pathlib objects are not serializable.
+        """
+        schema = self.schema()
+        return json.dumps(schema.dump(self), indent=4)
 
 
 @dc.dataclass
@@ -305,6 +468,9 @@ class BenchplotUserConfig(Config):
     #: Path to the qemu sources, inferred from :attr:`src_path` if missing
     qemu_path: Optional[ConfigPath] = dc.field(init=False, default=None)
 
+    #: Path to the Cheri LLVM sources, inferred from :attr:`src_path` if missing
+    llvm_path: Optional[ConfigPath] = dc.field(init=False, default=None)
+
     #: Override the maximum number of workers to use
     concurrent_workers: Optional[int] = None
 
@@ -318,6 +484,7 @@ class BenchplotUserConfig(Config):
         self.cheribuild_path = self.src_path / "cheribuild"
         self.cheribsd_path = self.src_path / "cheribsd"
         self.qemu_path = self.src_path / "qemu"
+        self.llvm_path = self.src_path / "llvm-project"
         # Try to autodetect openocd
         if self.openocd_path is None:
             self.openocd_path = shutil.which("openocd")
@@ -328,7 +495,7 @@ class BenchplotUserConfig(Config):
 
 
 @dc.dataclass
-class CommonPlatformOptions(TemplateConfig):
+class CommonPlatformOptions(Config):
     """
     Base class for platform-specific options.
     This is internally used during benchmark dataset collection to
@@ -364,7 +531,7 @@ class CommonPlatformOptions(TemplateConfig):
 
 
 @dc.dataclass
-class PlatformOptions(TemplateConfig):
+class PlatformOptions(Config):
     """
     Platform options for an instance.
     This accepts the same fields as :class:`CommonPlatformOptions`, but
@@ -404,7 +571,7 @@ class PlatformOptions(TemplateConfig):
 
 
 @dc.dataclass
-class ProfileConfig(TemplateConfig):
+class ProfileConfig(Config):
     """
     Common profiling options.
     These are inteded to be embedded into benchmark task_options for those benchmarks
@@ -429,12 +596,17 @@ class ProfileConfig(TemplateConfig):
 class InstancePlatform(Enum):
     QEMU = "qemu"
     VCU118 = "vcu118"
+    LOCAL = "local"
 
     def __str__(self):
         return self.value
 
+    def is_fpga(self):
+        return self == InstancePlatform.VCU118
+
 
 class InstanceCheriBSD(Enum):
+    LOCAL_NATIVE = "native"
     RISCV64_PURECAP = "riscv64-purecap"
     RISCV64_HYBRID = "riscv64-hybrid"
     MORELLO_PURECAP = "morello-purecap"
@@ -475,28 +647,30 @@ class InstanceKernelABI(Enum):
 
 
 @dc.dataclass
-class InstanceConfig(TemplateConfig):
+class InstanceConfig(Config):
     """
     Configuration for a CheriBSD instance to run benchmarks on.
     XXX-AM May need a custom __eq__() if iterable members are added
     """
-
+    #: Name of the kernel configuration file used
     kernel: str
+    #: Is this the baseline reference platform for analysis?
     baseline: bool = False
+    #: Optional name used for user-facing output such as plot legends
     name: Optional[str] = None
-    platform: InstancePlatform = dc.field(
-        default=InstancePlatform.QEMU, metadata={"by_value": True}
-    )
-    cheri_target: InstanceCheriBSD = dc.field(
-        default=InstanceCheriBSD.RISCV64_PURECAP, metadata={"by_value": True}
-    )
-    kernelabi: InstanceKernelABI = dc.field(
-        default=InstanceKernelABI.HYBRID, metadata={"by_value": True}
-    )
-    # Is the kernel config name managed by cheribuild or is it an extra one
-    # specified via --cheribsd/extra-kernel-configs?
+    #: Platform identifier, this affects the strategy used to run execution tasks
+    platform: InstancePlatform = dc.field(default=InstancePlatform.QEMU, metadata={"by_value": True})
+    #: Userspace ABI identifier
+    cheri_target: InstanceCheriBSD = dc.field(default=InstanceCheriBSD.RISCV64_PURECAP, metadata={"by_value": True})
+    #: Kernel ABI identifier
+    kernelabi: InstanceKernelABI = dc.field(default=InstanceKernelABI.HYBRID, metadata={"by_value": True})
+    #: Is the kernel config name managed by cheribuild or is it an extra one
+    #: specified via --cheribsd/extra-kernel-configs?
     cheribuild_kernel: bool = True
-    # Internal fields, should not appear in the config file and are missing by default
+    #: Additional key-value parameters that can be used in benchmark templates to 'parameterize' on
+    #: the platform axis. These are otherwise unused.
+    parameters: Dict[str, ConfigAny] = dc.field(default_factory=dict)
+    #: Internal fields, should not appear in the config file and are missing by default
     platform_options: PlatformOptions = dc.field(default_factory=PlatformOptions)
 
     @property
@@ -536,16 +710,15 @@ class InstanceConfig(TemplateConfig):
     def __post_init__(self):
         super().__post_init__()
         if self.name is None:
-            self.name = (
-                f"{self.platform}-{self.cheri_target}-{self.kernelabi}-{self.kernel}"
-            )
+            self.name = (f"{self.platform} UserABI:{self.cheri_target} "
+                         f"KernABI:{self.kernelabi} KernConf:{self.kernel}")
 
     def __str__(self):
         return f"{self.name}"
 
 
 @dc.dataclass
-class TaskTargetConfig(TemplateConfig):
+class TaskTargetConfig(Config):
     """
     Specify an analysis task and associated options.
     """
@@ -554,11 +727,19 @@ class TaskTargetConfig(TemplateConfig):
     handler: ConfigTaskSpec
 
     #: Extra options for the dataset handler, depend on the handler
-    task_options: Dict[str, ConfigAny] = lazy_nested_config_field()
+    task_options: LazyNestedConfig = dc.field(default_factory=dict)
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Resolve the lazy task options if this is not already a Config
+        if dc.is_dataclass(self.task_options):
+            assert isinstance(self.task_options, Config), f"Task options must inherit from Config"
+        else:
+            self.task_options = resolve_task_options(self.handler, self.task_options, is_exec=False)
 
 
 @dc.dataclass
-class ExecTargetConfig(TemplateConfig):
+class ExecTargetConfig(Config):
     """
     Specify an execution task name.
     Note that the namespace of this task is also used to resolve compatible analysis tasks.
@@ -568,7 +749,47 @@ class ExecTargetConfig(TemplateConfig):
     handler: ConfigExecTaskSpec
 
     #: Extra options for the dataset handler, depend on the handler
-    task_options: Dict[str, ConfigAny] = lazy_nested_config_field()
+    task_options: LazyNestedConfig = dc.field(default_factory=dict)  # Dict[str, ConfigAny] = lazy_nested_config_field()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Resolve the lazy task options if this is not already a Config
+        if dc.is_dataclass(self.task_options):
+            assert isinstance(self.task_options, Config), f"Task options must inherit from Config"
+        else:
+            self.task_options = resolve_task_options(self.handler, self.task_options, is_exec=True)
+
+
+@dc.dataclass
+class PlotConfig(Config):
+    """
+    Plotting configuration.
+    This is separated in case it needs to be propagated separately.
+    """
+    #: Generate multiple split plots instead of combining
+    split_subplots: bool = False
+    #: Output formats
+    plot_output_format: List[str] = dc.field(default_factory=lambda: ["pdf"])
+
+
+@dc.dataclass
+class AnalysisConfig(Config):
+    #: General plot configuration
+    plot: PlotConfig = dc.field(default_factory=PlotConfig)
+
+    #: Constants to show in various plots, depending on the X and Y axes.
+    # The dictionary maps parameters of the benchmark parameterisation to a dict
+    # mapping description -> constant value
+    parameter_constants: Dict[str, dict] = dc.field(default_factory=dict)
+
+    #: Baseline dataset group id, defaults to the baseline instance uuid
+    baseline_gid: Optional[UUID] = None
+
+    #: Use builtin symbolizer instead of addr2line
+    use_builtin_symbolizer: bool = True
+
+    #: Specify analysis passes to run
+    tasks: List[TaskTargetConfig] = dc.field(default_factory=list)
 
 
 @dc.dataclass
@@ -585,14 +806,9 @@ class PipelineInstanceConfig(Config):
     #: Instance descriptors for each instance to run
     instances: List[InstanceConfig] = dc.field(default_factory=list)
 
-    def __post_init__(self):
-        super().__post_init__()
-        if len(self.instances) == 0:
-            raise ValueError("There must be at least one instance configuration")
-
 
 @dc.dataclass
-class CommonBenchmarkConfig(TemplateConfig):
+class CommonBenchmarkConfig(Config):
     """
     Common benchmark configuration parameters.
     This is shared between the user-facing configuration file and the internal
@@ -602,11 +818,18 @@ class CommonBenchmarkConfig(TemplateConfig):
     #: The name of the benchmark
     name: str
     #: The number of iterations to run
-    iterations: int
+    iterations: int = 1
     #: Benchmark configuration
-    benchmark: ExecTargetConfig
+    #: .. deprecated:: 1.2
+    #:    Use :attr:`generators` instead.
+    benchmark: Optional[ExecTargetConfig] = None
     #: Auxiliary data generators
+    #: .. deprecated:: 1.2
+    #:    Use :attr:`generators` instead.
     aux_tasks: List[ExecTargetConfig] = dc.field(default_factory=list)
+    #: Data generator tasks.
+    #: These are used to produce the benchmark data and loading it during the analysis phase.
+    generators: List[ExecTargetConfig] = dc.field(default_factory=list)
     #: Number of iterations to drop to reach steady-state
     drop_iterations: int = 0
     #: Benchmark description, used for plot titles (can contain a template), defaults to :attr:`name`.
@@ -633,9 +856,21 @@ class CommonBenchmarkConfig(TemplateConfig):
 
     def __post_init__(self):
         super().__post_init__()
-        assert (
-            self.remote_output_dir.is_absolute()
-        ), f"Remote output path must be absolute {self.remote_output_dir}"
+        assert self.remote_output_dir.is_absolute(), f"Remote output path must be absolute {self.remote_output_dir}"
+        conftype = self.__class__.__name__
+        if self.benchmark is None:
+            if self.aux_tasks:
+                raise ValueError(f"Can not use `{conftype}.aux_tasks` and `{conftype}.generators` at the same time")
+            if not self.generators:
+                raise ValueError(f"At least one `{conftype}.generators` must be specified.")
+        else:
+            if self.generators:
+                raise ValueError(f"Can not use both `{conftype}.benchmark` and `{conftype}.generators`")
+            self.generators.append(self.benchmark)
+            self.generators.extend(self.aux_tasks)
+        # Wipe deprecated fields
+        self.benchmark = None
+        self.aux_tasks = []
 
     @classmethod
     def from_common_conf(cls, other: "CommonBenchmarkConfig"):
@@ -678,9 +913,7 @@ class BenchmarkRunConfig(CommonBenchmarkConfig):
     instance: Optional[InstanceConfig] = None
 
     def __str__(self):
-        common_info = (
-            f"params={self.parameters} ns={self.benchmark.handler} aux={self.aux_tasks}"
-        )
+        common_info = f"params={self.parameters} gen={self.generators}"
         if self.g_uuid and self.instance:
             return (
                 f"{self.name} ({self.uuid}/{self.g_uuid}) on {self.instance} "
@@ -691,7 +924,7 @@ class BenchmarkRunConfig(CommonBenchmarkConfig):
 
 
 @dc.dataclass
-class CommonSessionConfig(TemplateConfig):
+class CommonSessionConfig(Config):
     """
     Common session configuration.
     This is shared between the user-facing configuration file format and the
@@ -718,6 +951,9 @@ class CommonSessionConfig(TemplateConfig):
 
     #: Extract symbols with elftools instead of llvm
     use_builtin_symbolizer: bool = True
+
+    #: Default analysis task configuration
+    analysis_config: AnalysisConfig = dc.field(default_factory=AnalysisConfig)
 
     def __post_init__(self):
         super().__post_init__()
@@ -771,6 +1007,10 @@ class SessionRunConfig(CommonSessionConfig):
     #: Session unique ID
     uuid: UUID = dc.field(default_factory=uuid4)
 
+    #: Snapshots of the relevant git repositories that should be syncronised to this session
+    #: These are taken when the session is created.
+    git_sha: Dict[str, str] = dc.field(default_factory=dict)
+
     #: Session name, defaults to the session UUID
     name: Optional[str] = None
 
@@ -797,9 +1037,38 @@ class SessionRunConfig(CommonSessionConfig):
                     )
 
     @classmethod
-    def generate(
-        cls, user_config: BenchplotUserConfig, config: PipelineConfig
-    ) -> "SessionRunConfig":
+    def _resolve_template(cls, session_config: Self) -> Self:
+        """
+        Resolve all template substitutions, except the user_config substitutions that must
+        be resolved at session-load time.
+
+        This produces a new session configuration with the substituted values.
+        Note that this resolves first the common session template keys, then per-dataset
+        configuration keys are introduced and resolved.
+        """
+        ctx = ConfigContext()
+        # Default namespace
+        ctx.add_namespace(session_config)
+        new_config = session_config.bind(ctx)
+
+        # Replace the default namespace as we have an updated version
+        ctx.add_namespace(new_config)
+        # Now scan through all the configurations and subsitute per-dataset fields
+        new_bench_conf = []
+        for bench_conf in new_config.configurations:
+            ctx.add_namespace(bench_conf, "benchmark")
+            # Shorthand for the corresponding instance configuration
+            ctx.add_namespace(bench_conf.instance, "instance")
+            # Register parameterization keys, note that these may happen shadow
+            # other names, but let it be for now
+            ctx.add_values(**bench_conf.parameters)
+            # Finally do the binding
+            new_bench_conf.append(bench_conf.bind(ctx))
+        new_config.configurations = new_bench_conf
+        return new_config
+
+    @classmethod
+    def generate(cls, user_config: BenchplotUserConfig, config: PipelineConfig) -> Self:
         """
         Generate a new :class:`SessionRunConfig` from a :class:`PipelineConfig`.
         Manual benchmark parameterization is supported by specifying multiple benchmarks with
@@ -816,7 +1085,6 @@ class SessionRunConfig(CommonSessionConfig):
         :return: A new session runfile configuration
         """
         session = SessionRunConfig.from_common_conf(config)
-        logger = logging.getLogger("cheri-benchplot")
         logger.info("Create new session %s", session.uuid)
 
         # Collect benchmarks and the instances
@@ -859,6 +1127,17 @@ class SessionRunConfig(CommonSessionConfig):
                     run_conf.parameters = parameters
                     all_conf.append(run_conf)
 
+        # If there is no instance, use the local instance
+        if not config.instance_config.instances:
+            config.instance_config.instances.append(
+                InstanceConfig(kernel="unknown",
+                               baseline=True,
+                               name="local",
+                               platform=InstancePlatform.LOCAL,
+                               cheri_target=InstanceCheriBSD.LOCAL_NATIVE,
+                               kernelabi=InstanceKernelABI.NOCHERI,
+                               cheribuild_kernel=False))
+
         # Map instances to dataset group IDs
         group_uuids = [uuid4() for _ in config.instance_config.instances]
 
@@ -875,37 +1154,20 @@ class SessionRunConfig(CommonSessionConfig):
                 final_run_conf.g_uuid = gid
                 final_run_conf.instance = final_inst_conf
                 session.configurations.append(final_run_conf)
-        return session
 
+        # Snapshot all repositories we care about, if they are present.
+        # Note that we should support snapshot hooks in the configured tasks.
+        def snap_head(repo_path, key):
+            if repo_path.exists():
+                session.git_sha[key] = Repo(repo_path).head.commit.hexsha
+            else:
+                logger.warning("No %s repository, skip SHA snapshot", key)
 
-@dc.dataclass
-class PlotConfig(Config):
-    """
-    Plotting configuration.
-    This is separated in case it needs to be propagated separately.
-    """
+        snap_head(user_config.cheribuild_path, "cheribuild")
+        snap_head(user_config.cheribsd_path, "cheribsd")
+        snap_head(user_config.qemu_path, "qemu")
+        snap_head(user_config.llvm_path, "llvm")
 
-    #: Generate multiple split plots instead of combining
-    split_subplots: bool = False
-    #: Output formats
-    plot_output_format: List[str] = dc.field(default_factory=lambda: ["pdf"])
-
-
-@dc.dataclass
-class AnalysisConfig(Config):
-    #: General plot configuration
-    plot: PlotConfig = dc.field(default_factory=PlotConfig)
-
-    #: Constants to show in various plots, depending on the X and Y axes.
-    # The dictionary maps parameters of the benchmark parameterisation to a dict
-    # mapping description -> constant value
-    parameter_constants: Dict[str, dict] = dc.field(default_factory=dict)
-
-    #: Baseline dataset group id, defaults to the baseline instance uuid
-    baseline_gid: Optional[UUID] = None
-
-    #: Use builtin symbolizer instead of addr2line
-    use_builtin_symbolizer: bool = True
-
-    #: Specify analysis passes to run
-    handlers: List[TaskTargetConfig] = dc.field(default_factory=list)
+        # Now that we are done with generating the configuration, resolve all
+        # templates that do not involve the user configuration
+        return cls._resolve_template(session)
